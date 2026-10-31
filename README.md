@@ -46,6 +46,8 @@ Results appear in a panel with a "Copy report" button. Keep the tab visible whil
 4. Universal indicator and the pH scale
 5. Thermal decomposition of copper(II) carbonate, with the limewater test
 
+On a first visit a short guided tour explains the controls; it includes two "try it" steps. Progress is saved automatically in the browser (`localStorage`): the bench, the current step, the notebook, which experiments are finished and the best quiz scores. The welcome screen offers "Continue where you left off", and burners and hot plates come back switched off. The ? button can replay the tour or clear saved progress. Saving is per browser and per device; it doesn't sync between computers.
+
 Undo (Ctrl+Z, or the arrow button in the top bar) reverses pours, drops, and pipette or burette actions. Drag a test tube to move it to an empty slot in a rack.
 
 ## Note for teachers

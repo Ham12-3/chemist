@@ -224,6 +224,18 @@ h4.sec{margin:14px 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:
 .ph-chart{display:grid;grid-template-columns:repeat(15,1fr);border-radius:10px;overflow:hidden;margin:8px 0}
 .ph-chart div{height:46px;display:grid;place-items:end center;padding-bottom:4px;font-weight:700;color:#fff;font-size:12px;text-shadow:0 1px 2px rgba(0,0,0,.4)}
 .ph-scale-labels{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+.tab .num.done{background:var(--ok);color:#fff}
+
+/* =====================================================================
+   GUIDED TOUR
+   ===================================================================== */
+.tour{position:fixed;inset:0;z-index:40;pointer-events:none}
+.tour-spot{position:fixed;border-radius:12px;box-shadow:0 0 0 9999px rgba(8,12,20,.55);transition:all .3s ease;pointer-events:none}
+.tour-bubble{position:fixed;width:min(330px,calc(100vw - 24px));background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:12px 16px;pointer-events:auto;transition:top .3s ease,left .3s ease}
+.tour-bubble h4{margin:4px 0;font-size:15px}
+.tour-bubble p{margin:0 0 10px;font-size:13.5px}
+.tour-count{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.tour-actions{display:flex;gap:6px;align-items:center}
 </style>
 <script type="importmap">
 { "imports": {
@@ -1878,7 +1890,7 @@ function onClick(hit) {
 const selRing = new THREE.Mesh(new THREE.RingGeometry(0.92, 1, 48), new THREE.MeshBasicMaterial({ color: 0x2f6bff, transparent: true, opacity: 0.85, depthWrite: false }));
 selRing.rotation.x = -Math.PI / 2; selRing.visible = false; selRing.renderOrder = 5; scene.add(selRing);
 const snapRings = [];
-function select(item) { S.selected = item; renderCard(); }
+function select(item) { S.selected = item; renderCard(); bus.emit('selected', { item }); }
 function deselect() { S.selected = null; renderCard(); }
 
 /* ---------- Dragging & dropping on the bench ---------- */
@@ -3008,9 +3020,10 @@ function toast({ title, text = '', eq, eq2, kind = '', time = 7000 }) {
 }
 
 /* ---------- Modals ---------- */
-function openModal({ icon = 'ℹ️', title, sub = '', body = '', actions = [{ label: 'OK', primary: true }], warn = false, wide = false, onOpen }) {
+function openModal({ icon = 'ℹ️', title, sub = '', body = '', actions = [{ label: 'OK', primary: true }], warn = false, wide = false, onOpen, kind = '' }) {
   const m = $('#modal');
   m.className = 'modal' + (warn ? ' warn' : '');
+  m.dataset.kind = kind;
   m.style.width = wide ? 'min(720px,100%)' : '';
   m.innerHTML = `<div class="m-head"><div class="m-icon">${icon}</div><div><h2>${esc(title)}</h2>${sub ? `<div class="m-sub">${esc(sub)}</div>` : ''}</div></div>
     <div class="m-body">${body}</div>
@@ -3262,7 +3275,7 @@ const Runner = {
     const extra = st.onPass?.(value);
     this.i++; this.showHint = false;
     this.feedback = { text: (typeof extra === 'string' ? extra : note) || ['Well done!', 'Great!', 'Correct!', 'Nice work!'][this.i % 4], good: true };
-    if (this.i >= this.exp.steps.length) { this.completed = true; notebookLog('Experiment complete.', 'result'); }
+    if (this.i >= this.exp.steps.length) { this.completed = true; notebookLog('Experiment complete.', 'result'); markProgress(this.exp.id, { completed: true }); }
     renderSteps(); renderFoot();
     if (!this.completed) setTimeout(() => this.handle({ type: 'enter' }), 400);
     else setTimeout(() => offerQuiz(), 900);
@@ -3430,6 +3443,7 @@ function openQuiz() {
   };
   const finish = () => {
     notebookLog(`Quiz score: ${score} / ${quiz.length}.`, 'result');
+    markProgress(Runner.exp.id, { bestQuiz: Math.max(score, PROGRESS[Runner.exp.id]?.bestQuiz ?? 0) });
     const next = EXPERIMENTS.find(e => e.num === Runner.exp.num + 1);
     openModal({
       icon: score === quiz.length ? '🏆' : '📘', title: 'Quiz results', sub: Runner.exp.title,
@@ -3446,18 +3460,205 @@ function showHelp() {
       <section><h5>Camera</h5><ul><li><b>Drag</b> on empty space to orbit around the bench.</li><li><b>Right-drag</b> to pan, <b>scroll</b> to zoom.</li><li><b>Double-click</b> an item (or "Zoom to") to look closely. <kbd>R</kbd> or the ↺ button resets the view.</li></ul></section>
       <section><h5>Equipment</h5><ul><li><b>Hover</b> over an item to see its name. <b>Click</b> it to see what it is used for and what is inside.</li><li><b>Drag</b> items to move them on the bench. Green rings show where they snap (hot plate, burner, under the burette).</li></ul></section>
       <section><h5>Chemistry</h5><ul><li><b>Pour:</b> select a container → "Pour into…" → click the target → choose the volume.</li><li><b>Drops:</b> select a dropper bottle → "Add drops to…".</li><li><b>Heat:</b> put a beaker or flask on the hot plate or Bunsen burner and turn it on.</li><li><b>Burette:</b> select it → choose the tap setting, or "Add 1 drop" (<kbd>D</kbd>).</li><li><kbd>Esc</kbd> cancels a pour or closes a window.</li></ul></section>
-      <section><h5>Units</h5>Volumes are in cm³ (1 cm³ = 1 mL). Concentrations are in mol/dm³ (M).</section></div>`,
+      <section><h5>Units</h5>Volumes are in cm³ (1 cm³ = 1 mL). Concentrations are in mol/dm³ (M).</section>
+      <section><h5>Saving</h5>Your bench, steps, notebook, completed experiments and quiz scores are saved automatically in this browser. Add <kbd>?test</kbd> to the address to run the built-in self-test.</section></div>`,
+    actions: [
+      { label: 'Replay the tour', fn: () => Tour.start() },
+      { label: 'Clear saved progress', fn: () => openModal({ icon: '🗑️', warn: true, title: 'Clear saved progress?', body: '<p>This removes your completed experiments, quiz scores and saved session from this browser. It cannot be undone.</p>', actions: [{ label: 'Cancel' }, { label: 'Clear', primary: true, fn: clearSavedProgress }] }) },
+      { label: 'OK', primary: true },
+    ],
   });
 }
-function showWelcome() {
+function showWelcome(saved) {
+  S.welcomed = true;
+  const cont = savedSessionWorthContinuing(saved) ? EXPERIMENTS.find(e => e.id === saved.exp) : null;
+  const contLabel = !cont ? '' : !cont.steps.length ? 'free exploring' : saved.completed ? 'completed – take the quiz or review your notebook' : `step ${Math.min(saved.i + 1, cont.steps.length)} of ${cont.steps.length}`;
+  const status = e => { const p = PROGRESS[e.id] || {}; return (p.completed ? ' <span class="chip ok">✓ Completed</span>' : '') + (p.bestQuiz != null ? ` <span class="chip">Quiz best ${p.bestQuiz}/3</span>` : ''); };
   openModal({
-    icon: '⚗️', title: 'Welcome to ChemLab 3D', sub: 'A virtual chemistry laboratory for hands-on learning', wide: true,
-    body: `<p>Choose an experiment. Each one has an intro card, step-by-step guidance that checks your work, an automatic lab notebook and a short quiz.</p>
-      <div style="display:grid;gap:6px">${EXPERIMENTS.map(e => `<button class="quiz-opt" data-exp="${e.id}" style="margin:0"><b>${e.num ? e.num + '. ' : ''}${esc(e.title)}</b><br><span style="color:var(--muted);font-size:12.5px">${esc(e.sub)}</span></button>`).join('')}</div>`,
+    kind: 'welcome', icon: '⚗️', title: 'Welcome to ChemLab 3D', sub: 'A virtual chemistry laboratory for hands-on learning', wide: true,
+    body: `${cont ? `<button class="quiz-opt" data-continue style="margin:0 0 12px;border-color:var(--accent);background:var(--accent-soft)"><b>▶ Continue where you left off</b><br><span style="color:var(--muted);font-size:12.5px">${esc(cont.title)} – ${esc(contLabel)}</span></button>` : ''}
+      <p>Choose an experiment. Each one has an intro card, step-by-step guidance that checks your work, an automatic lab notebook and a short quiz.</p>
+      <div style="display:grid;gap:6px">${EXPERIMENTS.map(e => `<button class="quiz-opt" data-exp="${e.id}" style="margin:0"><b>${e.num ? e.num + '. ' : ''}${esc(e.title)}</b>${status(e)}<br><span style="color:var(--muted);font-size:12.5px">${esc(e.sub)}</span></button>`).join('')}</div>
+      <p style="color:var(--muted);font-size:12px;margin-bottom:0">Your progress is saved automatically in this browser.</p>`,
     actions: [{ label: 'Close' }],
-    onOpen: m => m.querySelectorAll('[data-exp]').forEach(b => b.onclick = () => { const e = EXPERIMENTS.find(x => x.id === b.dataset.exp); closeModal(); Runner.start(e); showIntro(e); }),
+    onOpen: m => {
+      m.querySelectorAll('[data-exp]').forEach(b => b.onclick = () => { const e = EXPERIMENTS.find(x => x.id === b.dataset.exp); closeModal(); Runner.start(e); showIntro(e); });
+      const c = m.querySelector('[data-continue]');
+      if (c) c.onclick = () => {
+        closeModal();
+        try { restoreSession(saved); toast({ title: 'Welcome back!', text: `Your ${cont.title.toLowerCase()} session is restored. Burners and hot plates start switched off.`, kind: 'ok', time: 5000 }); }
+        catch (err) { toast({ title: 'Could not restore your session', text: err.message, kind: 'warn' }); Runner.start(EXPERIMENTS[0]); }
+      };
+    },
   });
 }
+
+/* ---------- Saved progress (this browser only) ---------- */
+const SAVE_KEY = 'chemlab-session-v1', PROGRESS_KEY = 'chemlab-progress-v1', TOUR_KEY = 'chemlab-tour-v1';
+const store = {
+  get(k) { if (TEST_MODE) return null; try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } },
+  set(k, v) { if (TEST_MODE) return; try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } },
+  del(k) { if (TEST_MODE) return; try { localStorage.removeItem(k); } catch (e) { } },
+};
+let PROGRESS = {};   // { experimentId: { completed, bestQuiz } }
+function markProgress(id, patch) {
+  PROGRESS[id] = { ...(PROGRESS[id] || {}), ...patch };
+  store.set(PROGRESS_KEY, PROGRESS);
+  renderTabs();
+}
+
+/** Everything needed to rebuild the bench and the experiment exactly as it was. */
+function snapshotSession() {
+  const idx = e => (e ? equipment.indexOf(e) : -1);
+  return {
+    v: 1, exp: Runner.exp.id, i: Runner.i, completed: Runner.completed,
+    hclConc: SUBSTANCES.hcl_unknown.conc, goggles: S.goggles,
+    notebook: S.notebook, results: S.results, titre: S.titre, titr: S.titr,
+    elapsed: (performance.now() - S.t0) / 1000,
+    logged: [...S.logged], explained: [...S.explained],
+    underBurette: idx(S.underBurette),
+    items: equipment.map(e => {
+      const o = {};
+      if (e.parentEquip) { o.rack = idx(e.parentEquip); o.slot = e.slot; } else o.pos = e.group.position.toArray();
+      const c = e.container;
+      if (c && !c.infinite) { const m = c.m; o.m = { vol: m.vol, temp: m.temp, sp: m.sp, ind: m.ind, ppt: m.ppt, solid: m.solid, solid0: m.solid0, added: m.added }; }
+      if (e.onSource) o.onSource = idx(e.onSource);
+      if (e.kind === 'burette') Object.assign(o, { dispensed: e.dispensed, fillVol: e.fillVol, runStart: e.runStart || 0 });
+      if (e.kind === 'wire') Object.assign(o, { coating: e.coating, clean: e.clean, contaminated: !!e.contaminated, sampleName: e.sampleName || '' });
+      if (e.kind === 'boilingtube') Object.assign(o, { deliveryIn: e.deliveryIn, decompProgress: e.decompProgress || 0, bunsen: idx(e.bunsen) });
+      if (e.kind === 'hotplate') o.level = e.level;
+      if (e.kind === 'bunsen') o.air = e.air;
+      return o;
+    }),
+  };
+}
+/** Rebuild a saved session. Burners and hot plates come back switched off, for safety. */
+function restoreSession(snap) {
+  const exp = EXPERIMENTS.find(e => e.id === snap.exp);
+  if (!exp || snap.v !== 1) throw new Error('This saved session is from an older version.');
+  Runner.start(exp);
+  if (snap.items.length !== equipment.length) throw new Error('The bench layout has changed since this session was saved.');
+  SUBSTANCES.hcl_unknown.conc = snap.hclConc;
+  equipment.forEach((e, k) => {
+    const o = snap.items[k];
+    if (o.pos && !e.parentEquip) { e.group.position.fromArray(o.pos); e.home = e.group.position.clone(); if (e.holder) e.holder.position.copy(e.group.position); }
+    if (o.m && e.container) {
+      const m = new Mixture(); Object.assign(m, JSON.parse(JSON.stringify(o.m))); m.touch();
+      Object.assign(e.container, { m, appVer: -1, lastLevel: -1, lastSolid: -1 });
+    }
+    if (e.kind === 'burette') Object.assign(e, { dispensed: o.dispensed, fillVol: o.fillVol, runStart: o.runStart });
+    if (e.kind === 'wire') { Object.assign(e, { coating: o.coating, clean: o.clean, contaminated: o.contaminated, sampleName: o.sampleName }); e.coatMesh.visible = o.coating.length > 0; }
+    if (e.kind === 'hotplate') setHotLevel(e, o.level);
+    if (e.kind === 'bunsen') { e.air = o.air; updateCollar(e); }
+    if (e.kind === 'boilingtube') { e.deliveryIn = o.deliveryIn; e.decompProgress = o.decompProgress; }
+  });
+  // test tubes back into their saved rack slots
+  for (const rk of findAll('rack')) rk.tubes = [];
+  equipment.forEach((e, k) => { const o = snap.items[k]; if (o.rack >= 0 && o.rack !== undefined) rackAddTube(equipment[o.rack], e, o.slot); });
+  // links between items
+  equipment.forEach((e, k) => {
+    const o = snap.items[k];
+    if (o.onSource >= 0) { e.onSource = equipment[o.onSource]; if (e.onSource.kind === 'bunsen') e.onSource.tripod.visible = true; }
+    if (e.kind === 'boilingtube') { e.bunsen = o.bunsen >= 0 ? equipment[o.bunsen] : null; if (e.limeTube) buildDeliveryTube(e, e.limeTube); }
+  });
+  S.underBurette = snap.underBurette >= 0 ? equipment[snap.underBurette] : null;
+  setGoggles(snap.goggles);
+  Runner.i = snap.i; Runner.completed = snap.completed; Runner.feedback = null;
+  S.notebook = snap.notebook; S.results = snap.results; S.titre = snap.titre;
+  S.titr = { ...snap.titr, dirty: true };
+  S.t0 = performance.now() - snap.elapsed * 1000;
+  S.logged = new Set(snap.logged); S.explained = new Set(snap.explained);
+  notebookLog('Continued from your saved session.', 'action');
+  $('#nbCount').textContent = S.notebook.filter(n => n.kind !== 'action').length;
+  rebuildPickables(); renderSteps(); renderFoot(); nbDirty = true;
+}
+let saveTimer = 0;
+/** Save a moment after anything happens (but never mid-animation, and not before the user has chosen what to do). */
+function scheduleSave() {
+  if (TEST_MODE || !S.welcomed || Tour.active || !Runner.exp) return;
+  if ($('#modalBackdrop').classList.contains('show') && $('#modal').dataset.kind === 'welcome') return;
+  S.saveArmed = true;
+  clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 700);
+}
+function saveNow() {
+  if (S.busy) { saveTimer = setTimeout(saveNow, 500); return; }
+  store.set(SAVE_KEY, snapshotSession());
+}
+bus.on(scheduleSave);
+window.addEventListener('pagehide', () => { if (S.saveArmed && !S.busy) saveNow(); });
+function savedSessionWorthContinuing(snap) {
+  if (!snap || snap.v !== 1 || !EXPERIMENTS.some(e => e.id === snap.exp)) return false;
+  return snap.i > 0 || (snap.notebook && snap.notebook.filter(n => n.kind !== 'action' || !/^Started|goggles/i.test(n.text)).length > 0);
+}
+function clearSavedProgress() {
+  store.del(SAVE_KEY); store.del(PROGRESS_KEY); store.del(TOUR_KEY);
+  PROGRESS = {}; S.saveArmed = false; clearTimeout(saveTimer);
+  renderTabs();
+  toast({ title: 'Saved progress cleared', text: 'Completed experiments, quiz scores and the saved session were removed from this browser.', time: 4000 });
+}
+
+/* ---------- First-time guided tour ---------- */
+const TOUR = [
+  { title: 'Welcome to ChemLab 3D!', text: 'Here is a quick tour – it takes about 30 seconds. You can skip it at any time.' },
+  { target: '#stage', title: 'The lab bench', text: 'Drag to look around, right-drag to slide sideways and scroll to zoom. On a touchscreen use one finger to look around and two to zoom.' },
+  { target: '#stage', title: 'Try it: pick something up', text: 'Click any item on the bench – a beaker or a bottle.', waitFor: ev => ev.type === 'selected' },
+  { target: '#infoCard', title: 'The item card', text: 'Every item has a card: what it is used for, what is inside, its pH, temperature and hazards – plus buttons like "Pour into…" and "Add drops to…".' },
+  { target: '#gogglesPill', title: 'Safety first', text: 'Always put on your safety goggles before handling chemicals. Try it now: click this button.', waitFor: ev => ev.type === 'goggles' && ev.on },
+  { target: '#expTabs', title: 'Experiments', text: 'Pick one of five guided experiments here, or stay in the free lab and explore.' },
+  { target: '#panel', title: 'Steps and lab notebook', text: 'Each experiment gives you steps that check your work. Your actions and observations are written into the Lab notebook tab for you.' },
+  { target: '.top-actions', title: 'Undo, view and help', text: 'Undo your last action (Ctrl+Z), reset the camera, show labels, switch light/dark mode – and the ? button explains everything and can replay this tour.' },
+];
+const Tour = {
+  active: false, i: 0, el: null, onDone: null,
+  start(onDone) {
+    this.end(false);
+    this.onDone = onDone || null; this.i = 0; this.active = true;
+    this.el = document.createElement('div');
+    this.el.className = 'tour';
+    this.el.innerHTML = `<div class="tour-spot"></div><div class="tour-bubble" role="dialog" aria-live="polite"><div class="tour-count"></div><h4></h4><p></p>
+      <div class="tour-actions"><button class="btn small" data-tour="skip">Skip tour</button><span style="flex:1"></span><button class="btn small" data-tour="back">Back</button><button class="btn small primary" data-tour="next">Next</button></div></div>`;
+    document.body.appendChild(this.el);
+    this.el.addEventListener('click', e => { const b = e.target.closest('[data-tour]'); if (!b) return; ({ skip: () => this.end(true), back: () => this.go(this.i - 1), next: () => this.go(this.i + 1) })[b.dataset.tour](); });
+    this.show();
+  },
+  go(i) { if (i >= TOUR.length) return this.end(true); this.i = Math.max(0, i); this.show(); },
+  show() {
+    if (!this.active) return;
+    const st = TOUR[this.i], spot = this.el.querySelector('.tour-spot'), bub = this.el.querySelector('.tour-bubble');
+    bub.querySelector('.tour-count').innerHTML = `${this.i + 1} / ${TOUR.length}${st.waitFor ? ' <span class="chip ok">👉 Try it</span>' : ''}`;
+    bub.querySelector('h4').textContent = st.title;
+    bub.querySelector('p').textContent = st.text;
+    bub.querySelector('[data-tour="back"]').style.visibility = this.i ? 'visible' : 'hidden';
+    bub.querySelector('[data-tour="next"]').textContent = this.i === TOUR.length - 1 ? 'Finish' : st.waitFor ? 'Skip this' : 'Next';
+    const t = st.target && document.querySelector(st.target);
+    const r = t && t.offsetParent !== null && t.getBoundingClientRect();
+    const W = innerWidth, H = innerHeight, bw = bub.offsetWidth, bh = bub.offsetHeight, pad = 6;
+    if (!r || !r.width) {
+      Object.assign(spot.style, { left: W / 2 + 'px', top: H / 2 + 'px', width: '2px', height: '2px' });
+      Object.assign(bub.style, { left: (W - bw) / 2 + 'px', top: (H - bh) / 2 + 'px' });
+      return;
+    }
+    Object.assign(spot.style, { left: r.left - pad + 'px', top: r.top - pad + 'px', width: r.width + pad * 2 + 'px', height: r.height + pad * 2 + 'px' });
+    let left = clamp(r.left + r.width / 2 - bw / 2, 12, W - bw - 12), top;
+    if (r.height > H * 0.45) { top = r.bottom - bh - 16; left = clamp(r.left + 16, 12, W - bw - 12); }   // big areas: bubble inside, bottom-left
+    else if (r.bottom + bh + 14 < H) top = r.bottom + 12;
+    else top = Math.max(12, r.top - bh - 12);
+    Object.assign(bub.style, { left: left + 'px', top: top + 'px' });
+  },
+  onEvent(ev) {
+    if (!this.active) return;
+    const st = TOUR[this.i];
+    if (st.waitFor && st.waitFor(ev)) { const i = this.i; setTimeout(() => { if (this.active && this.i === i) this.go(i + 1); }, 450); }
+  },
+  end(done) {
+    if (this.el) this.el.remove();
+    this.el = null;
+    const wasActive = this.active; this.active = false;
+    if (done && wasActive) { store.set(TOUR_KEY, true); const f = this.onDone; this.onDone = null; f?.(); }
+  },
+};
+bus.on(ev => Tour.onEvent(ev));
+window.addEventListener('resize', () => Tour.show());
 
 /* ---------- Theme ---------- */
 const THEMES = ['auto', 'light', 'dark'];
@@ -3470,8 +3671,14 @@ function applyTheme(i) {
   S.titr.dirty = true;
 }
 
+function renderTabs() {
+  $('#expTabs').innerHTML = EXPERIMENTS.map(e => {
+    const done = PROGRESS[e.id]?.completed;
+    return `<button class="tab${Runner.exp === e ? ' active' : ''}" data-id="${e.id}" title="${esc(e.title)}${done ? ' (completed)' : ''}">${e.num ? `<span class="num${done ? ' done' : ''}">${done ? '✓' : e.num}</span>` : ''}${esc(e.short)}</button>`;
+  }).join('');
+}
 function setupUI() {
-  $('#expTabs').innerHTML = EXPERIMENTS.map(e => `<button class="tab" data-id="${e.id}">${e.num ? `<span class="num">${e.num}</span>` : ''}${esc(e.short)}</button>`).join('');
+  renderTabs();
   $('#expTabs').onclick = e => {
     const b = e.target.closest('.tab'); if (!b) return;
     const exp = EXPERIMENTS.find(x => x.id === b.dataset.id);
@@ -3760,6 +3967,30 @@ async function runSelfTests() {
     toggleHotplate(hp);
   });
 
+  await scenario('Saving and tour', async () => {
+    await startExp('precip');
+    const tubes = findAll('testtube'), rack = find('rack');
+    startDrag(tubes[0]); tubes[0].group.position.copy(rack.group.localToWorld(V3(rack.slots[4], 0.009, 0))); dropItem(tubes[0]);
+    await doPour(reagent('nacl'), tubes[0], 2); await doDrops(dropper('agno3'), tubes[0], 3);
+    const ki = reagent('ki'); ki.group.position.x += 0.05; const bx = ki.group.position.x;
+    const snap = JSON.parse(JSON.stringify(snapshotSession()));
+    const stepBefore = Runner.i, nbBefore = S.notebook.length;
+    await startExp('flame');
+    restoreSession(snap); await realWait(600);
+    const t1 = equipment.find(e => e.kind === 'testtube' && e.label === '1');
+    ok('Saving', 'A saved session restores the experiment and step', Runner.exp.id === 'precip' && Runner.i === stepBefore, `step ${Runner.i} vs ${stepBefore}`);
+    ok('Saving', 'Container contents are restored, precipitate included', t1.container.m.ppt['AgCl(s)'] > 0 && near(t1.container.m.added.nacl, 2, 1e-9));
+    ok('Saving', 'Rack slots and bench positions are restored', t1.slot === 4 && t1.parentEquip?.kind === 'rack' && near(reagent('ki').group.position.x, bx, 1e-9));
+    ok('Saving', 'The lab notebook is restored', S.notebook.length === nbBefore + 1);
+    ok('Saving', 'Completed experiments are recorded', PROGRESS.titration?.completed && PROGRESS.indicator?.completed);
+    Tour.start();
+    ok('Tour', 'The tour opens', Tour.active && !!document.querySelector('.tour .tour-bubble'));
+    Tour.go(2); bus.emit('selected', {}); await realWait(700);
+    ok('Tour', '"Try it" steps move on when the student does the action', Tour.i === 3);
+    Tour.go(TOUR.length);
+    ok('Tour', 'Finishing closes the tour', !Tour.active && !document.querySelector('.tour'));
+  });
+
   TIME_SCALE = 1;
   panel.update(results, true, info);
   const passed = results.filter(x => x.pass).length;
@@ -3776,6 +4007,7 @@ function init() {
     stream: makeStream(),
   };
   makeControls();
+  PROGRESS = store.get(PROGRESS_KEY) || {};
   setupUI();
   if (matchMedia('(pointer: coarse)').matches) $('#hint').textContent = 'One finger: orbit · Two fingers: zoom & pan · Tap an item to select it';
   setTimeout(() => $('#hint').classList.add('fade'), 12000);
@@ -3784,7 +4016,10 @@ function init() {
   $('#loading').remove();
   loop();
   if (TEST_MODE) { TIME_SCALE = 5; setTimeout(runSelfTests, 800); }
-  else showWelcome();
+  else {
+    const saved = store.get(SAVE_KEY);
+    if (!store.get(TOUR_KEY) && !saved) Tour.start(() => showWelcome(saved)); else showWelcome(saved);
+  }
 }
 try { init(); }
 catch (err) {
