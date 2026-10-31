@@ -55,7 +55,7 @@ button{font:inherit;color:inherit}
 #expTabs::-webkit-scrollbar{display:none}
 .tab{border:1px solid transparent;background:transparent;padding:6px 11px;border-radius:999px;cursor:pointer;white-space:nowrap;color:var(--muted);font-weight:550;font-size:13px}
 .tab:hover{background:var(--surface-2);color:var(--text)}
-.tab.active{background:var(--accent-soft);color:var(--accent);border-color:color-mix(in srgb,var(--accent) 30%,transparent)}
+.tab.active{background:var(--accent-soft);color:var(--accent);border-color:var(--accent);border-color:color-mix(in srgb,var(--accent) 30%,transparent)}
 .tab .num{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;background:var(--surface-3);font-size:11px;margin-right:6px;color:var(--muted)}
 .tab.active .num{background:var(--accent);color:var(--accent-text)}
 .top-actions{display:flex;gap:6px;align-items:center}
@@ -64,7 +64,7 @@ button{font:inherit;color:inherit}
 .icon-btn svg{width:18px;height:18px}
 .pill{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;border:1px solid var(--border);background:var(--surface-2);cursor:pointer;font-weight:600;font-size:12.5px;white-space:nowrap}
 .pill .dot{width:8px;height:8px;border-radius:50%;background:var(--danger)}
-.pill.on{background:var(--ok-soft);border-color:color-mix(in srgb,var(--ok) 35%,transparent);color:var(--ok)}
+.pill.on{background:var(--ok-soft);border-color:var(--ok);border-color:color-mix(in srgb,var(--ok) 35%,transparent);color:var(--ok)}
 .pill.on .dot{background:var(--ok)}
 
 #main{display:grid;grid-template-columns:minmax(0,1fr) 380px;min-height:0}
@@ -77,6 +77,16 @@ button{font:inherit;color:inherit}
   .brand span{display:none}
   .card{width:min(320px,calc(100% - 24px))!important}
 }
+@media (max-width:640px){
+  #app{grid-template-rows:auto 1fr}
+  #topbar{flex-wrap:wrap;padding:6px 10px;row-gap:4px}
+  #expTabs{order:3;flex-basis:100%}
+  .top-actions{margin-left:auto}
+  #gogglesText{display:none}
+  #toasts{width:calc(100% - 24px)}
+}
+#hint{transition:opacity .6s}
+#hint.fade{opacity:0;pointer-events:none}
 
 /* =====================================================================
    COMMON CONTROLS
@@ -156,7 +166,7 @@ kbd{font:11px ui-monospace,Consolas,monospace;padding:1px 5px;border:1px solid v
 .step::before{counter-increment:step;content:counter(step);position:absolute;left:9px;top:9px;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;background:var(--surface-3);color:var(--muted)}
 .step.done{color:var(--text)}
 .step.done::before{content:"✓";background:var(--ok);color:#fff}
-.step.current{background:var(--accent-soft);color:var(--text);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 30%,transparent)}
+.step.current{background:var(--accent-soft);color:var(--text);box-shadow:inset 0 0 0 1px var(--accent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 30%,transparent)}
 .step.current::before{background:var(--accent);color:var(--accent-text)}
 .step .why{font-size:12.5px;color:var(--muted);margin-top:4px}
 .step .feedback{margin-top:6px;font-size:12.5px;padding:6px 8px;border-radius:8px;background:var(--warn-soft);color:var(--warn)}
@@ -268,6 +278,20 @@ h4.sec{margin:14px 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:
 
 <div class="modal-backdrop" id="modalBackdrop"><div class="modal" id="modal" role="dialog" aria-modal="true"></div></div>
 
+<script>
+/* Friendly message if WebGL is missing or the 3D engine cannot load (offline or a very old browser). */
+(function () {
+  function fail(msg) { var el = document.getElementById('loading'); if (el) el.innerHTML = '<div>' + msg + '</div>'; }
+  var c = document.createElement('canvas');
+  if (!(c.getContext('webgl2') || c.getContext('webgl'))) {
+    fail('<b>This browser or computer cannot show 3D graphics (WebGL).</b><br>Try an up-to-date Chrome, Edge, Firefox or Safari and make sure hardware acceleration is switched on.');
+    return;
+  }
+  setTimeout(function () {
+    fail('<b>The 3D lab is taking too long to load.</b><br>The 3D engine is downloaded when the page opens, so check your internet connection – or use the offline version (chemlab-offline.html). Very old browsers are not supported; please update yours.');
+  }, 15000);
+})();
+</script>
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -313,6 +337,7 @@ function updateTweens(dt) {
   }
 }
 const wait = s => tween(s, () => {});
+let TIME_SCALE = 1;   // the self-test speeds up simulated time
 
 /** Simple event bus: the experiment runner listens to everything the user does. */
 const bus = {
@@ -657,6 +682,7 @@ function onResize() {
   const w = stageEl.clientWidth, h = stageEl.clientHeight;
   renderer.setSize(w, h, false);
   camera.aspect = w / Math.max(h, 1);
+  camera.fov = camera.aspect < 1 ? 62 : 42;   // portrait screens (phones) need a wider view to see the bench
   camera.updateProjectionMatrix();
 }
 new ResizeObserver(onResize).observe(stageEl);
@@ -816,7 +842,9 @@ function makeTag(text, opts = {}) {
   }
   const tex = canvasTexture(512, 128, (g, w, h) => {
     g.fillStyle = 'rgba(255,255,255,0.92)';
-    const r = 30; g.beginPath(); g.roundRect(4, 14, w - 8, h - 28, r); g.fill();
+    const r = 30; g.beginPath();
+    if (g.roundRect) g.roundRect(4, 14, w - 8, h - 28, r); else g.rect(4, 14, w - 8, h - 28);
+    g.fill();
     g.strokeStyle = 'rgba(0,0,0,0.15)'; g.lineWidth = 3; g.stroke();
     g.fillStyle = color; g.textAlign = 'center'; g.textBaseline = 'middle';
     let size = 52; g.font = `bold ${size}px system-ui, sans-serif`;
@@ -3028,7 +3056,7 @@ function notebookLog(text, kind = 'action') {
   $('#nbCount').textContent = S.notebook.filter(n => n.kind !== 'action').length;
   nbDirty = true;
 }
-function recordResult(type, key, data) { (S.results[type] ||= {})[key] = data; nbDirty = true; }
+function recordResult(type, key, data) { if (!S.results[type]) S.results[type] = {}; S.results[type][key] = data; nbDirty = true; }
 function renderNotebook() {
   nbDirty = false;
   const el = $('#panelNotebook'); if (el.hidden) return;
@@ -3318,10 +3346,34 @@ function setupUI() {
    7. MAIN LOOP & START-UP
    ===================================================================== */
 const clock = new THREE.Clock();
-let liveTimer = 0;
+let liveTimer = 0, graphTimer = 0;
+
+/* ---------- Adaptive quality: if the frame rate stays low, lower resolution, then turn off shadows ---------- */
+const QUALITY = { level: new URLSearchParams(location.search).get('quality') === 'low' ? 0 : 2, acc: 0, frames: 0, skip: 2 };
+function applyQuality() {
+  renderer.setPixelRatio(QUALITY.level >= 2 ? Math.min(window.devicePixelRatio, 1.75) : 1);
+  sun.castShadow = QUALITY.level >= 1;
+  onResize();
+}
+function adaptQuality(rawDt) {
+  if (rawDt > 0.25) return;                 // tab was hidden or paused – ignore this frame
+  QUALITY.acc += rawDt; QUALITY.frames++;
+  if (QUALITY.acc < 2) return;
+  const fps = QUALITY.frames / QUALITY.acc;
+  QUALITY.acc = 0; QUALITY.frames = 0;
+  if (QUALITY.skip > 0) { QUALITY.skip--; return; }   // first seconds include shader compilation
+  if (fps < 42 && QUALITY.level > 0) {
+    QUALITY.level--; QUALITY.skip = 1; applyQuality();
+    toast({ title: 'Graphics simplified', text: QUALITY.level === 1 ? 'The lab lowered its resolution so it runs smoothly on this computer.' : 'Shadows were turned off so the lab runs smoothly on this computer.', time: 5000 });
+  }
+}
+document.addEventListener('visibilitychange', () => { QUALITY.acc = 0; QUALITY.frames = 0; });
+
 function loop() {
   requestAnimationFrame(loop);
-  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  const raw = clock.getDelta();
+  adaptQuality(raw);
+  const dt = Math.min(raw, 0.05) * TIME_SCALE, time = clock.elapsedTime;
   updateTweens(dt);
   for (let i = 0; i < equipment.length; i++) {
     const e = equipment[i];
@@ -3339,9 +3391,205 @@ function loop() {
   updateSelRing(time);
   liveTimer -= dt;
   if (liveTimer <= 0) { liveTimer = 0.2; liveUpdate(); updateReadouts(); updateProgressLine(); if (nbDirty) renderNotebook(); }
-  if (S.titr.dirty) drawGraph();
+  graphTimer -= dt;
+  if (S.titr.dirty && graphTimer <= 0) { graphTimer = 0.1; drawGraph(); }
   controls.update(); clampTarget();
   renderer.render(scene, camera);
+}
+
+/* =====================================================================
+   8. SELF-TEST — open index.html?test to run unit and scenario tests in any browser
+   ===================================================================== */
+const TEST_MODE = new URLSearchParams(location.search).has('test');
+
+function makeTestPanel() {
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;right:12px;top:68px;width:min(440px,calc(100% - 24px));max-height:calc(100% - 90px);overflow:auto;z-index:30;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);padding:12px 14px;font-size:12.5px';
+  document.body.appendChild(el);
+  return {
+    update(results, done, info) {
+      const pass = results.filter(r => r.pass).length, fail = results.length - pass;
+      const groups = [...new Set(results.map(r => r.group))];
+      el.innerHTML = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b style="font-size:15px;flex:1">Self-test ${done ? (fail ? '– failures' : '– all passed') : '– running…'}</b>
+        ${done ? '<button class="btn small" data-t="copy">Copy report</button><button class="btn small" data-t="close">Close</button>' : ''}</div>
+        <div style="margin-bottom:8px"><span class="chip ok">${pass} passed</span> <span class="chip ${fail ? 'haz' : ''}">${fail} failed</span></div>
+        <div style="color:var(--muted);margin-bottom:8px">${esc(info)}</div>
+        ${groups.map(g => `<h4 class="sec" style="margin:10px 0 4px">${esc(g)}</h4>` + results.filter(r => r.group === g).map(r => `<div style="padding:2px 0;color:${r.pass ? 'inherit' : 'var(--danger)'}">${r.pass ? '✓' : '✗'} ${esc(r.name)}${r.detail ? ` <span style="color:var(--muted)">(${esc(r.detail)})</span>` : ''}</div>`).join('')).join('')}`;
+      const c = el.querySelector('[data-t="copy"]'), x = el.querySelector('[data-t="close"]');
+      if (c) c.onclick = () => navigator.clipboard?.writeText(`ChemLab 3D self-test: ${pass} passed, ${fail} failed\n${info}\n\n` + results.map(r => `${r.pass ? 'PASS' : 'FAIL'}  [${r.group}] ${r.name}${r.detail ? ' (' + r.detail + ')' : ''}`).join('\n'));
+      if (x) x.onclick = () => el.remove();
+    },
+  };
+}
+
+async function runSelfTests() {
+  const results = [];
+  const gl = renderer.getContext(), dbg = gl.getExtension('WEBGL_debug_renderer_info');
+  const ua = navigator.userAgent;
+  const browser = (ua.match(/Edg\/[\d.]+/) || ua.match(/Firefox\/[\d.]+/) || ua.match(/Chrome\/[\d.]+/) || ua.match(/Version\/[\d.]+ .*Safari/) || [ua])[0];
+  const info = `${browser} · WebGL${renderer.capabilities.isWebGL2 ? '2' : '1'} · ${dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : 'GPU unknown'} · ${matchMedia('(pointer: coarse)').matches ? 'touch' : 'mouse'}`;
+  const panel = makeTestPanel();
+  const ok = (group, name, pass, detail = '') => { results.push({ group, name, pass: !!pass, detail }); panel.update(results, false, info); };
+  const near = (a, b, tol) => a != null && Math.abs(a - b) <= tol;
+  const simWait = s => tween(s, () => {});
+  const realWait = ms => new Promise(r => setTimeout(r, ms));
+  const until = async (fn, maxSim = 60) => { let t = 0; while (!fn() && t < maxSim) { await simWait(0.1); t += 0.1; } return fn(); };
+  const mix = (...parts) => { const m = new Mixture(), fired = []; for (const [id, v] of parts) { m.merge(mixtureOf(id, v)); fired.push(...Chem.react(m).map(f => f.rule.id)); } return { m, fired }; };
+  const pHof = (...parts) => Chem.pH(mix(...parts).m);
+  const reagent = id => equipment.find(e => e.kind === 'reagent' && e.substance === id);
+  const dropper = id => equipment.find(e => e.kind === 'dropper' && e.substance === id);
+  const stepClick = async (sel) => { const b = $('#panelSteps').querySelector(sel); if (!b) throw new Error('missing control ' + sel); b.click(); await realWait(60); };
+  const answer = async v => { $('#stepInput').value = v; await stepClick('[data-step="check"]'); };
+  const startExp = async id => { Runner.start(EXPERIMENTS.find(e => e.id === id)); closeModal(); setGoggles(true); await realWait(60); };
+  const scenario = async (name, fn) => {
+    try { await Promise.race([fn(), realWait(120000).then(() => { throw new Error('timed out'); })]); }
+    catch (e) { ok('Scenarios', name, false, e.message); }
+    closeModal(); cancelMode();
+  };
+
+  /* ---- 1. Data integrity ---- */
+  const bad = [];
+  for (const [id, s] of Object.entries(SUBSTANCES)) for (const k of [...Object.keys(s.ions || {}), ...Object.keys(s.systems || {})]) if (!IONS[k] && !WEAK[k]) bad.push(`${id}:${k}`);
+  ok('Data', 'Every substance uses known ions / weak-acid systems', !bad.length, bad.join(', '));
+  const badR = [];
+  for (const r of REACTIONS) for (const k of Object.keys(r.products || {})) if (!SOLIDS[k] && !IONS[k] && !MOLECULES[k] && !SUBSTANCES[k] && k !== 'CO2') badR.push(`${r.id}:${k}`);
+  ok('Data', 'Every reaction product is defined', !badR.length, badR.join(', '));
+  ok('Data', 'Every reaction has an observation, equation and explanation', REACTIONS.every(r => r.observation && r.equation && r.explain));
+  ok('Data', 'Every experiment step has text and a check', EXPERIMENTS.every(e => e.steps.every(s => s.text && (s.check || s.type))));
+  ok('Data', 'Every guided experiment has a valid 3-question quiz', EXPERIMENTS.filter(e => e.steps.length).every(e => e.quiz && e.quiz.length === 3 && e.quiz.every(q => q.options[q.answer])));
+
+  /* ---- 2. pH engine ---- */
+  for (const [id, want] of [['water', 7.00], ['hcl', 1.00], ['naoh', 13.00], ['ethanoic', 2.88], ['nh4cl', 5.13], ['ammonia', 11.12], ['nahco3', 8.34], ['limewater', 12.60]]) {
+    const got = pHof([id, 10]); ok('pH engine', `${SUBSTANCES[id].name}: pH ${fmt(want, 2)}`, near(got, want, 0.05), `got ${fmt(got, 2)}`);
+  }
+  for (const [v, want] of [[0, 1.00], [12.5, 1.48], [24.9, 3.70], [25, 7.00], [25.1, 10.30], [30, 11.96]]) {
+    const got = pHof(['hcl', 25], ['naoh', v]); ok('pH engine', `25 cm³ 0.1 M HCl + ${v} cm³ 0.1 M NaOH: pH ${fmt(want, 2)}`, near(got, want, 0.03), `got ${fmt(got, 2)}`);
+  }
+  const buf = pHof(['ethanoic', 20], ['naoh', 10]); ok('pH engine', 'Half-neutralised ethanoic acid: pH = pKa 4.76', near(buf, 4.76, 0.03), `got ${fmt(buf, 2)}`);
+  const weq = pHof(['ethanoic', 20], ['naoh', 20]); ok('pH engine', 'Ethanoic acid at equivalence: pH 8.73', near(weq, 8.73, 0.05), `got ${fmt(weq, 2)}`);
+
+  /* ---- 3. Reaction rules & indicators ---- */
+  let r = mix(['nacl', 2], ['agno3', 0.15]);
+  ok('Reactions', 'NaCl + AgNO₃ gives a silver chloride precipitate', near(r.m.ppt['AgCl(s)'], 7.5e-6, 1e-9) && (r.m.sp['Ag+'] || 0) < 1e-12);
+  r = mix(['cuso4', 2], ['hcl', 5], ['naoh_drop', 0.1]);
+  ok('Reactions', 'No copper(II) hydroxide while acid is in excess', !(r.m.ppt['Cu(OH)2(s)'] > 0));
+  r = mix(['cuso4', 2], ['naoh_drop', 2]);
+  ok('Reactions', 'CuSO₄ + excess NaOH: all Cu²⁺ precipitates', near(r.m.ppt['Cu(OH)2(s)'], 2e-4, 1e-9) && Chem.pH(r.m) > 12);
+  r = mix(['nacl', 2], ['naoh_drop', 1], ['agno3', 0.5]);
+  ok('Reactions', 'Halide precipitates before silver oxide', r.m.ppt['AgCl(s)'] > 0 && !(r.m.ppt['Ag2O(s)'] > 0));
+  ok('Reactions', 'NaHCO₃ + excess HCl fizzes (CO₂)', mix(['nahco3', 3], ['hcl', 5]).fired.includes('co2'));
+  ok('Reactions', 'NaHCO₃ on its own does not fizz', !mix(['nahco3', 3]).fired.includes('co2'));
+  r = mix(['limewater', 8]); r.m.sp.CO3 = 1e-4; r.m.touch(); Chem.react(r.m);
+  ok('Reactions', 'CO₂ turns limewater milky (CaCO₃)', near(r.m.ppt['CaCO3(s)'], 1e-4, 1e-9) && Chem.appearance(r.m).cloud > 0.5);
+  ok('Reactions', 'Neutralisation: 25 cm³ 0.1 M HCl + 25 cm³ 0.1 M NaOH = 2.5 mmol', near(Chem.neutralised(mixtureOf('hcl', 25), mixtureOf('naoh', 25)), 2.5e-3, 1e-9));
+  const th = new Mixture(); th.addSolid('cuco3', 0.01); th.temp = 500;
+  for (let i = 0; i < 200; i++) Chem.thermal(th, 0.25);
+  ok('Reactions', 'Heating CuCO₃ gives CuO (all of it)', th.solid.cuco3 === 0 && near(th.solid.cuo, 0.01, 1e-9));
+  const cold = new Mixture(); cold.addSolid('cuco3', 0.01); Chem.thermal(cold, 10);
+  ok('Reactions', 'CuCO₃ does not decompose at room temperature', cold.solid.cuco3 === 0.01);
+  const a = mix(['hcl', 20], ['nacl', 10]).m, before = a.sp['Cl-'], piece = a.split(0.3);
+  ok('Reactions', 'Pouring conserves amounts (split + merge)', near(piece.sp['Cl-'] + a.sp['Cl-'], before, 1e-15) && near(piece.vol, 9, 1e-9));
+  const col = (...p) => Chem.appearance(mix(...p).m).color;
+  let c = col(['hcl', 2], ['ui', 0.15]); ok('Indicators', 'Universal indicator is red in strong acid', c.r > c.g * 1.5 && c.r > c.b * 1.5);
+  c = col(['water', 2], ['ui', 0.15]); ok('Indicators', 'Universal indicator is green in water', c.g > c.r && c.g > c.b);
+  c = col(['naoh', 2], ['ui', 0.15]); ok('Indicators', 'Universal indicator is violet in strong alkali', c.b > c.g && c.r > c.g);
+  c = col(['hcl', 25], ['php', 0.15]); ok('Indicators', 'Phenolphthalein is colourless in acid', Math.abs(c.r - WATER_C.r) < 0.02 && Math.abs(c.g - WATER_C.g) < 0.02);
+  c = col(['naoh', 25], ['php', 0.15]); ok('Indicators', 'Phenolphthalein is pink in alkali', c.r > c.g * 1.3);
+
+  /* ---- 4. Scenarios: drive the real app like a student ---- */
+  await scenario('Titration', async () => {
+    await startExp('titration');
+    const pip = find('pipette'), fl = find('flask'), bur = find('burette');
+    await pipetteFill(pip, reagent('hcl_unknown')); cancelMode();
+    await pipetteRelease(pip, fl);
+    ok('Scenarios', 'Titration: pipette delivers exactly 25.00 cm³', near(fl.container.vol, 25, 0.001), `got ${fmt(fl.container.vol, 3)}`);
+    await doDrops(dropper('php'), fl, 3);
+    await buretteFill(bur, reagent('naoh'));
+    fl.group.position.copy(bur.group.localToWorld(bur.snapLocal.clone())); dropItem(fl);
+    const eq = 25 * SUBSTANCES.hcl_unknown.conc / 0.1;
+    setTap(bur, 'fast'); await until(() => bur.dispensed >= eq - 1.2, 40); setTap(bur, 'closed');
+    for (let n = 0; n < 80 && Runner.i === 5; n++) { buretteDrop(bur); await simWait(0.4); }
+    ok('Scenarios', 'Titration: end point within one drop of equivalence', S.titr.end && near(S.titr.end.v, eq, 0.06), `end ${fmt(S.titr.end ? S.titr.end.v : 0, 2)} vs ${fmt(eq, 2)} cm³`);
+    ok('Scenarios', 'Titration: curve recorded', S.titr.points.length > 20);
+    await answer('10.00');
+    ok('Scenarios', 'Titration: a wrong titre is rejected', Runner.i === 6);
+    await answer(fmt(bur.dispensed, 2)); await answer(fmt(0.1 * bur.dispensed / 25, 4));
+    ok('Scenarios', 'Titration: all steps completed', Runner.completed);
+  });
+  await scenario('Flame tests', async () => {
+    await startExp('flame');
+    const b = find('bunsen'), w = find('wire'), acid = find('beaker');
+    toggleBunsen(b); toggleAir(b);
+    for (const g of findAll('watchglass')) { await dipWire(w, acid); await dipWire(w, g); await holdInFlame(w); }
+    const res = S.results.flame || {};
+    ok('Scenarios', 'Flame tests: five correct colours recorded', Object.keys(FLAME).every(i => res[i] && res[i].colour === FLAME[i].name));
+    await dipWire(w, findAll('watchglass')[0]); await dipWire(w, findAll('watchglass')[1]);
+    ok('Scenarios', 'Flame tests: unclean wire is detected', w.contaminated === true);
+    toggleBunsen(b); await realWait(500);
+    ok('Scenarios', 'Flame tests: all steps completed', Runner.completed);
+  });
+  await scenario('Precipitation', async () => {
+    await startExp('precip');
+    const tubes = findAll('testtube');
+    const plan = [['nacl', 'agno3', 'AgCl(s)'], ['kbr', 'agno3', 'AgBr(s)'], ['ki', 'agno3', 'AgI(s)'], ['cuso4', 'naoh_drop', 'Cu(OH)2(s)']];
+    for (let i = 0; i < 4; i++) { await doPour(reagent(plan[i][0]), tubes[i], 2); await doDrops(dropper(plan[i][1]), tubes[i], 3); }
+    ok('Scenarios', 'Precipitation: correct precipitate in each tube', plan.every((p, i) => tubes[i].container.m.ppt[p[2]] > 0));
+    ok('Scenarios', 'Precipitation: pour volume accurate', near(tubes[0].container.m.added.nacl, 2, 0.001));
+    await stepClick('[data-step="next"]');
+    ok('Scenarios', 'Precipitation: all steps completed', Runner.completed);
+  });
+  await scenario('Universal indicator', async () => {
+    await startExp('indicator');
+    for (const t of findAll('testtube')) await doDrops(dropper('ui'), t, 3);
+    await stepClick('[data-step="act"]'); closeModal(); await realWait(100);
+    await stepClick('[data-step="choice"][data-k="3"]'); await realWait(500);
+    await stepClick('[data-step="choice"][data-k="2"]'); await realWait(500);
+    const t1 = equipment.find(e => e.label === '1');
+    for (let n = 0; n < 12 && Runner.i === 5; n++) await doDrops(dropper('naoh_drop'), t1, 1);
+    ok('Scenarios', 'Indicator: tube 1 neutral after exactly 10 drops', near(Chem.pH(t1.container.m), 7, 0.01) && near(t1.container.m.added.naoh_drop, 0.5, 0.001));
+    await realWait(500); await stepClick('[data-step="next"]');
+    ok('Scenarios', 'Indicator: all steps completed', Runner.completed);
+  });
+  await scenario('Thermal decomposition', async () => {
+    await startExp('decomp');
+    await stepClick('[data-step="next"]');
+    const rig = find('boilingtube'), b = find('bunsen');
+    const p = rig.tubeG.localToWorld(V3()); b.group.position.set(p.x, BENCH_Y, p.z); dropItem(b);
+    ok('Scenarios', 'Decomposition: burner snaps under the tube', rig.bunsen === b);
+    toggleBunsen(b); toggleAir(b);
+    await until(() => rig.decompProgress >= 1, 60);
+    ok('Scenarios', 'Decomposition: all CuCO₃ turns to CuO', rig.container.m.solid.cuco3 === 0);
+    ok('Scenarios', 'Decomposition: limewater turns milky', Chem.appearance(rig.limeTube.container.m).cloud > 0.5);
+    toggleDelivery(rig); await realWait(500); toggleBunsen(b); await realWait(500);
+    await stepClick('[data-step="choice"][data-k="0"]');
+    ok('Scenarios', 'Decomposition: all steps completed', Runner.completed);
+  });
+  await scenario('Safety and heating', async () => {
+    await startExp('free'); setGoggles(false);
+    const hp = find('hotplate'), cylE = find('cylinder'), beakers = findAll('beaker'), bk1 = beakers[0], bk2 = beakers[1];
+    toggleHotplate(hp);
+    ok('Scenarios', 'Safety: no goggles → warning and no heating', /goggles/i.test(($('#modal h2') || {}).textContent || '') && !hp.on);
+    closeModal(); setGoggles(true);
+    cylE.group.position.copy(hp.group.position); dropItem(cylE); closeModal();
+    ok('Scenarios', 'Safety: measuring cylinder cannot be heated', cylE.onSource !== hp);
+    await doPour(reagent('ethanol'), bk1, 20);
+    bk1.group.position.copy(hp.group.position); dropItem(bk1); closeModal();
+    ok('Scenarios', 'Safety: ethanol cannot be heated', bk1.onSource !== hp);
+    await doPour(reagent('water'), cylE, 25);
+    ok('Scenarios', 'Measuring cylinder holds the poured 25.0 cm³', near(cylE.container.vol, 25, 0.001));
+    await doPour(reagent('water'), bk2, 30);
+    bk2.group.position.copy(hp.group.position); dropItem(bk2);
+    hp.level = 'high'; toggleHotplate(hp);
+    await until(() => bk2.container.m.temp >= 99.9, 60);
+    ok('Scenarios', 'Heating: water boils at 100 °C on the hot plate', near(bk2.container.m.temp, 100, 0.01));
+    toggleHotplate(hp);
+  });
+
+  TIME_SCALE = 1;
+  panel.update(results, true, info);
+  const passed = results.filter(x => x.pass).length;
+  window.__chemlabTests = { done: true, passed, failed: results.length - passed, results };
+  console.log(`ChemLab self-test: ${passed}/${results.length} passed`);
 }
 
 function init() {
@@ -3354,15 +3602,21 @@ function init() {
   };
   makeControls();
   setupUI();
-  onResize();
+  if (matchMedia('(pointer: coarse)').matches) $('#hint').textContent = 'One finger: orbit · Two fingers: zoom & pan · Tap an item to select it';
+  setTimeout(() => $('#hint').classList.add('fade'), 12000);
+  applyQuality();
   Runner.start(EXPERIMENTS[0]);
   $('#loading').remove();
-  // Handle for debugging / automated checks in the browser console
-  window.chemlab = { S, Chem, Runner, EXPERIMENTS, SUBSTANCES, equipment, find, setGoggles, doPour, doDrops, pipetteFill, pipetteRelease, buretteFill, buretteDrop, setTap, dropItem, toggleBunsen, toggleAir, dipWire, holdInFlame, toggleDelivery, toggleHotplate, mixtureOf, camera, controls, focusOn, flyTo, V3 };
   loop();
-  showWelcome();
+  if (TEST_MODE) { TIME_SCALE = 5; setTimeout(runSelfTests, 800); }
+  else showWelcome();
 }
-init();
+try { init(); }
+catch (err) {
+  console.error(err);
+  const el = $('#loading');
+  if (el) el.innerHTML = `<div><b>Sorry – the lab could not start.</b><br><small>${esc(err.message || err)}</small></div>`;
+}
 </script>
 </body>
 </html>

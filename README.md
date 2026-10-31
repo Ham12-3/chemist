@@ -12,6 +12,31 @@ python -m http.server 8123
 
 Then go to http://localhost:8123.
 
+### Without internet
+
+Build a standalone copy with Three.js embedded (needs Node 18+, and internet once to download Three.js):
+
+```bash
+node tools/build-offline.mjs
+```
+
+This writes `dist/chemlab-offline.html` (about 1.1 MB), which makes no network requests.
+
+### Slow computers
+
+The lab lowers its resolution, then turns off shadows, if the frame rate stays below about 42 fps. To start in low quality straight away, add `?quality=low` to the address.
+
+## Self-test
+
+Add `?test` to the address (for example `http://localhost:8123/?test`) to run the built-in test suite in any browser. It takes about 40 seconds and covers:
+
+- data integrity
+- the pH engine against textbook values
+- reaction rules and indicator colours
+- full runs through all five experiments, plus safety checks
+
+Results appear in a panel with a "Copy report" button. Keep the tab visible while it runs, because browsers pause background tabs.
+
 ## Experiments (Phase 1)
 
 0. Free lab: mix any of the chemicals on the bench
@@ -29,5 +54,5 @@ Then go to http://localhost:8123.
 4. **Interaction**: select, drag and snap, pour, drops, pipette, burette, heating, flame tests, effects
 5. **Experiments**: set-up, guided steps with checks, quizzes
 6. **UI**: side panel, notebook, info card, modals, theme
-
-The page exposes `window.chemlab` for debugging in the browser console.
+7. **Main loop**: adaptive quality, start-up
+8. **Self-test**: the `?test` suite
