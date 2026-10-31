@@ -53,3 +53,9 @@ await mkdir(join(ROOT, 'dist'), { recursive: true });
 const out = join(ROOT, 'dist', 'chemlab-offline.html');
 await writeFile(out, offline, 'utf8');
 console.log(`Wrote ${out} (${(offline.length / 1024 / 1024).toFixed(2)} MB)`);
+
+// The same bundled page as the website's home page: no third-party requests, so it also works
+// on school networks that block CDNs. Deploy with:  vercel deploy dist --prod
+const site = offline.replace('<title>ChemLab 3D (offline)</title>', '<title>ChemLab 3D</title>');
+await writeFile(join(ROOT, 'dist', 'index.html'), site, 'utf8');
+console.log(`Wrote ${join(ROOT, 'dist', 'index.html')} (website version)`);

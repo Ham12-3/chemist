@@ -2,6 +2,8 @@
 
 A 3D virtual chemistry laboratory in a single file: `index.html`. Three.js 0.160.0 loads from a CDN, so you need an internet connection.
 
+**Live site:** https://chemlab-3d.vercel.app. Share this link with students; it needs no account. There's also an offline copy to download: https://chemlab-3d.vercel.app/chemlab-offline.html.
+
 ## Run it
 
 Open `index.html` in a browser. If your browser blocks the module import when the file is opened directly, serve the folder instead:
@@ -20,7 +22,20 @@ Build a standalone copy with Three.js embedded (needs Node 18+, and internet onc
 node tools/build-offline.mjs
 ```
 
-This writes `dist/chemlab-offline.html` (about 1.1 MB), which makes no network requests.
+This writes `dist/chemlab-offline.html` (about 1.2 MB), which makes no network requests. It also writes `dist/index.html`, the same page used for the website.
+
+### Update the live site
+
+After changing `index.html`, rebuild and deploy (Vercel CLI, personal scope):
+
+```bash
+node tools/build-offline.mjs
+```
+```bash
+vercel deploy dist --prod --yes --project chemlab-3d --scope ham12-3s-projects
+```
+
+The website uses the bundled build, so it makes no requests to third-party CDNs. School networks often block those.
 
 ### Slow computers
 
