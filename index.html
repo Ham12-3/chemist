@@ -236,6 +236,27 @@ h4.sec{margin:14px 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:
 .tour-bubble p{margin:0 0 10px;font-size:13.5px}
 .tour-count{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
 .tour-actions{display:flex;gap:6px;align-items:center}
+
+/* =====================================================================
+   TEACHER TOOLS & PRINTABLE REPORT
+   ===================================================================== */
+.t-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:6px 0;font-size:13px}
+.t-row select,.t-row input,.t-link input{padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit}
+.t-row input[type=number]{width:100px}
+.t-note{font-size:12px;color:var(--muted);margin:6px 0}
+.t-link{display:flex;gap:6px}
+.t-link input{flex:1;min-width:0}
+#report{display:none}
+@media print{
+  html,body{height:auto;overflow:visible;background:#fff;color:#000}
+  #app,#modalBackdrop,.tour,#toasts{display:none!important}
+  #report{display:block;padding:12px;font:11pt/1.45 system-ui,sans-serif;color:#000}
+  #report h1{font-size:18pt;margin:0 0 8px}
+  #report h2{font-size:13pt;margin:16px 0 6px}
+  #report table{border-collapse:collapse;width:100%;margin:6px 0}
+  #report th,#report td{border:1px solid #999;padding:4px 6px;text-align:left;vertical-align:top}
+  #report th{background:#f0f0f0}
+}
 </style>
 <script type="importmap">
 { "imports": {
@@ -291,6 +312,7 @@ h4.sec{margin:14px 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:
 </div>
 
 <div class="modal-backdrop" id="modalBackdrop"><div class="modal" id="modal" role="dialog" aria-modal="true"></div></div>
+<div id="report"></div>
 
 <script>
 /* Friendly message if WebGL is missing or the 3D engine cannot load (offline or a very old browser). */
@@ -724,6 +746,11 @@ const INFO = {
   watchglass: 'A watch glass is a shallow glass dish used to hold a small amount of a solid sample.',
   boilingtube: 'A boiling tube is a wider, thicker test tube used for heating solids strongly. Here it is held in a clamp, and a delivery tube carries any gas into limewater.',
   chart: 'A universal indicator colour chart. Match the colour of your solution to the chart to find its approximate pH.',
+  soliddish: 'A dish of a solid reactant, cut into equal pieces. Add one piece at a time to a flask or beaker.',
+  syringe: 'A gas syringe collects and measures the gas made in a reaction. As gas comes in, it pushes the plunger out. Read the volume on the scale (0–100 cm³).',
+  splint: 'A wooden splint for gas tests. A lighted splint gives a squeaky pop with hydrogen; a glowing splint relights in oxygen.',
+  powerpack: 'A low-voltage DC power pack. It pushes electrons round the circuit: the electrode joined to the negative (black) terminal is the cathode, the positive (red) one is the anode.',
+  paper: 'Chromatography paper with a pencil start line and spots of four inks: A black, B green, C red food colouring and D an unknown ink. As the solvent soaks up the paper, it carries each dye a different distance.',
 };
 
 /** All equipment currently in the lab. */
@@ -1271,6 +1298,153 @@ function phChartTexture() {
   });
 }
 
+/** A dish of a solid reactant (e.g. magnesium ribbon) that is added one piece at a time. */
+function makeSolidDish(subId, pieceMol, pieceLabel) {
+  const sub = SUBSTANCES[subId];
+  const e = new Equip('soliddish', `${sub.name} (${pieceLabel} pieces)`, { radius: 0.045 });
+  e.group.add(glassMesh(new THREE.LatheGeometry(v2([[0, 0.001], [0.02, 0.003], [0.035, 0.008], [0.041, 0.011]]), 32)));
+  const mat = new THREE.MeshStandardMaterial({ color: sub.solidColor, metalness: 0.7, roughness: 0.3 });
+  for (let i = 0; i < 4; i++) {
+    const s = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.0012, 0.004), mat);
+    s.position.set((i - 1.5) * 0.006, 0.005 + i * 0.0012, (i % 2) * 0.004 - 0.002); s.rotation.y = i * 0.5; s.castShadow = true; e.group.add(s);
+  }
+  const tag = makeTag(sub.formula.replace('(s)', '')); tag.position.set(0, 0.06, 0); e.group.add(tag);
+  Object.assign(e, { substance: subId, pieceMol, pieceLabel, mouthY: 0.012, mouthR: 0.03 });
+  return e;
+}
+
+/** Horizontal 100 cm³ gas syringe on a clamp stand; the plunger moves out as gas comes in. */
+function makeGasSyringe() {
+  const e = new Equip('syringe', 'Gas syringe (100 cm³)', { radius: 0.11, movable: false });
+  const g = e.group, H = 0.22, len = 0.15, r = 0.013;
+  g.add(box(0.22, 0.012, 0.14, MAT.darkMetal, 0.03, 0.006, -0.05));
+  g.add(cyl(0.006, 0.006, 0.36, MAT.metal, 16, 0.06, 0.18, -0.1));
+  g.add(box(0.03, 0.03, 0.03, MAT.darkMetal, 0.06, H, -0.1));
+  g.add(box(0.012, 0.012, 0.09, MAT.metal, 0.06, H, -0.055));
+  g.add(box(0.012, 0.03, 0.03, MAT.rubber, 0.06, H, -0.012));
+  const bg = new THREE.Group(); bg.position.set(0, H, 0); g.add(bg);
+  const barrel = glassMesh(new THREE.CylinderGeometry(r, r, 0.17, 28, 1, true)); barrel.rotation.z = Math.PI / 2; bg.add(barrel);
+  const cap = glassMesh(new THREE.CylinderGeometry(0.004, r, 0.012, 24, 1, true)); cap.rotation.z = Math.PI / 2; cap.position.x = -0.091; bg.add(cap);
+  const noz = glassMesh(new THREE.CylinderGeometry(0.0028, 0.0028, 0.02, 12)); noz.rotation.z = Math.PI / 2; noz.position.x = -0.106; bg.add(noz);
+  const gs = new THREE.Group(); gs.rotation.z = -Math.PI / 2; gs.position.x = -0.08; bg.add(gs);
+  const marks = [];
+  for (let v = 0; v <= 100; v += 5) marks.push({ y: v / 100 * len, major: v % 10 === 0, label: v % 20 === 0 ? v : undefined });
+  addGraduations(gs, r + 0.0012, len, marks, { theta: 1.4 });
+  const pl = new THREE.Group(); bg.add(pl); e.plunger = pl;
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.96, r * 0.96, 0.006, 24), MAT.rubber); disc.rotation.z = Math.PI / 2; pl.add(disc);
+  const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.0025, 0.0025, 0.17, 10), MAT.white); rod.rotation.z = Math.PI / 2; rod.position.x = 0.085; pl.add(rod);
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.005, 20), MAT.white); handle.rotation.z = Math.PI / 2; handle.position.x = 0.17; pl.add(handle);
+  Object.assign(e, { vol: 0, shownVol: 0, gas: null, len, x0: -0.08, nozzleLocal: V3(-0.116, H, 0), mouthY: H, mouthR: 0.003 });
+  pl.position.x = e.x0;
+  e.nozzleWorld = () => g.localToWorld(e.nozzleLocal.clone());
+  e.collect = (n, gas) => {
+    if (e.vol >= 100) return;
+    e.vol = Math.min(100, e.vol + n * 24000); e.gas = gas;      // 1 mol of gas = 24 000 cm³ at room temperature
+    if (e.vol >= 100) toast({ title: 'The gas syringe is full', text: 'It holds 100 cm³. Reset it before the next run.', kind: 'warn', time: 4000 });
+  };
+  return e;
+}
+
+/** Wooden splint: lighted for the hydrogen "pop" test. */
+function makeSplint() {
+  const e = new Equip('splint', 'Wooden splint', { radius: 0.05, movable: false });
+  e.group.add(box(0.12, 0.003, 0.006, MAT.wood, 0, 0.0035, 0));
+  e.group.add(box(0.012, 0.0032, 0.0062, MAT.black, -0.055, 0.0035, 0));
+  e.flame = new THREE.Mesh(flameGeometry(0.004, 0.022), new THREE.MeshBasicMaterial({ color: 0xffa526, transparent: true, opacity: 0.85, depthWrite: false, toneMapped: false }));
+  e.flame.position.set(-0.062, 0.004, 0); e.flame.visible = false; e.flame.renderOrder = 4; e.group.add(e.flame);
+  e.tipLocal = V3(-0.062, 0.0035, 0);
+  return e;
+}
+
+/** A beaker with two graphite electrodes held in a lid: the electrolysis cell. */
+function makeElectrolysisCell() {
+  const e = makeBeaker(250, 'Electrolysis cell (beaker with graphite electrodes)');
+  e.cell = true; e.movable = false; e.deposit = 0;
+  e.info = 'An electrolysis cell: two inert graphite electrodes dip into the solution. The electrode joined to the negative terminal of the power pack is the cathode (−); the one joined to the positive terminal is the anode (+).';
+  const graphite = new THREE.MeshStandardMaterial({ color: 0x2b2d31, roughness: 0.6, metalness: 0.2 });
+  for (const x of [-0.013, 0.013]) e.group.add(cyl(0.0035, 0.0035, 0.13, graphite, 12, x, 0.071, 0));
+  e.group.add(box(0.085, 0.008, 0.016, new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.5 }), 0, 0.1, 0));
+  e.sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.0043, 0.0043, 0.05, 12), new THREE.MeshStandardMaterial({ color: 0xb8683a, metalness: 0.6, roughness: 0.35, transparent: true, opacity: 0 }));
+  e.sleeve.position.set(-0.013, 0.033, 0); e.sleeve.visible = false; e.group.add(e.sleeve);
+  const tc = makeTag('−', { square: true }); tc.position.set(-0.013, 0.158, 0); e.group.add(tc);
+  const ta = makeTag('+', { square: true }); ta.position.set(0.013, 0.158, 0); e.group.add(ta);
+  e.cathodeLocal = V3(-0.013, 0.012, 0); e.anodeLocal = V3(0.013, 0.012, 0);
+  e.topLocal = { cathode: V3(-0.013, 0.136, 0), anode: V3(0.013, 0.136, 0) };
+  return e;
+}
+
+/** Low-voltage DC power pack with a live display. */
+function makePowerPack() {
+  const e = new Equip('powerpack', 'Power pack (low-voltage DC)', { radius: 0.1, movable: false });
+  const g = e.group;
+  g.add(box(0.17, 0.09, 0.13, new THREE.MeshStandardMaterial({ color: 0x3a4250, roughness: 0.5 }), 0, 0.045, 0));
+  e.panelTex = canvasTexture(512, 256, () => {});
+  const panel = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.075), new THREE.MeshBasicMaterial({ map: e.panelTex, toneMapped: false }));
+  panel.position.set(0, 0.046, 0.0655); g.add(panel);
+  for (const [x, c] of [[0.05, 0xd32f2f], [0.025, 0x111111]]) g.add(cyl(0.006, 0.006, 0.012, new THREE.MeshStandardMaterial({ color: c, roughness: 0.4 }), 12, x, 0.096, 0.035));
+  Object.assign(e, { on: false, volts: 6, amps: 0, plusLocal: V3(0.05, 0.102, 0.035), minusLocal: V3(0.025, 0.102, 0.035) });
+  e.redrawDisplay = () => {
+    const gx = e.panelTex.image.getContext('2d');
+    gx.fillStyle = '#20262f'; gx.fillRect(0, 0, 512, 256);
+    gx.fillStyle = '#cfd8e3'; gx.font = 'bold 34px system-ui'; gx.textAlign = 'left'; gx.fillText('POWER PACK  DC', 24, 50);
+    gx.fillStyle = '#0b1a0e'; gx.fillRect(24, 80, 300, 120);
+    gx.fillStyle = e.on ? '#5cff7a' : '#24452c'; gx.font = 'bold 56px ui-monospace, monospace'; gx.fillText(`${e.volts.toFixed(1)} V`, 40, 140);
+    gx.font = 'bold 40px ui-monospace, monospace'; gx.fillText(`${e.amps.toFixed(2)} A`, 40, 188);
+    gx.fillStyle = e.on ? '#ff3b30' : '#4a1d1a'; gx.beginPath(); gx.arc(420, 140, 34, 0, Math.PI * 2); gx.fill();
+    gx.fillStyle = '#cfd8e3'; gx.font = '24px system-ui'; gx.textAlign = 'center'; gx.fillText(e.on ? 'ON' : 'OFF', 420, 205);
+    e.panelTex.needsUpdate = true;
+  };
+  e.redrawDisplay();
+  return e;
+}
+function buildWires(pack, cell) {
+  scene.updateMatrixWorld(true);
+  const wire = (from, to, color) => {
+    const mid = from.clone().lerp(to, 0.5); mid.y = Math.max(from.y, to.y) + 0.08;
+    const m = mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([from, mid, to]), 30, 0.0018, 8), new THREE.MeshStandardMaterial({ color, roughness: 0.5 }));
+    scene.add(m); pack.extras.push(m);
+  };
+  wire(pack.group.localToWorld(pack.plusLocal.clone()), cell.group.localToWorld(cell.topLocal.anode.clone()), 0xd32f2f);
+  wire(pack.group.localToWorld(pack.minusLocal.clone()), cell.group.localToWorld(cell.topLocal.cathode.clone()), 0x222222);
+  pack.cell = cell;
+}
+
+/** Chromatography paper with a pencil line and four ink spots; redrawn as the solvent rises. */
+function makeChromaPaper(beaker) {
+  const e = new Equip('paper', 'Chromatography paper', { radius: 0.06, movable: false });
+  const W = 0.05, Hh = 0.11;
+  e.tex = canvasTexture(256, 564, () => {});
+  const sheet = new THREE.Mesh(new THREE.PlaneGeometry(W, Hh), new THREE.MeshStandardMaterial({ map: e.tex, side: THREE.DoubleSide, roughness: 0.9 }));
+  sheet.position.y = Hh / 2; e.group.add(sheet);
+  Object.assign(e, { beaker, W, H: Hh, baseline: 0.015, front: 0, hung: false, washed: false, done: false, lastDrawn: -1,
+    inks: JSON.parse(JSON.stringify(INKS)), xs: { A: 0.009, B: 0.019, C: 0.029, D: 0.039 } });
+  e.redraw = () => {
+    const c = e.tex.image, gx = c.getContext('2d'), Wp = c.width, Hp = c.height;
+    const py = y => Hp - (y / e.H) * Hp, px = x => (x / e.W) * Wp;
+    gx.fillStyle = '#fbfbf6'; gx.fillRect(0, 0, Wp, Hp);
+    if (e.front > 0.003) {
+      gx.fillStyle = 'rgba(150,190,230,0.25)'; gx.fillRect(0, py(e.front), Wp, Hp - py(e.front));
+      gx.strokeStyle = 'rgba(80,120,170,0.55)'; gx.lineWidth = 2; gx.beginPath(); gx.moveTo(0, py(e.front)); gx.lineTo(Wp, py(e.front)); gx.stroke();
+    }
+    gx.strokeStyle = '#7a7a7a'; gx.lineWidth = 2; gx.beginPath(); gx.moveTo(8, py(e.baseline)); gx.lineTo(Wp - 8, py(e.baseline)); gx.stroke();
+    gx.fillStyle = '#555'; gx.font = 'bold 22px system-ui'; gx.textAlign = 'center';
+    const travel = Math.max(0, e.front - e.baseline);
+    for (const [k, ink] of Object.entries(e.inks)) {
+      const x = px(e.xs[k]);
+      gx.fillText(k, x, py(e.baseline) + 30);
+      for (const d of ink.dyes) {
+        const dist = DYES[d].Rf * travel, y = py(e.baseline + dist), r = 7 + dist * 260;
+        gx.globalAlpha = e.washed ? 0.12 : Math.max(0.35, 0.95 - dist * 4);
+        gx.fillStyle = DYES[d].color; gx.beginPath(); gx.ellipse(x, y, r * 0.8, r, 0, 0, Math.PI * 2); gx.fill();
+      }
+      gx.globalAlpha = 1;
+    }
+    e.tex.needsUpdate = true; e.lastDrawn = e.front;
+  };
+  e.redraw();
+  return e;
+}
+
 /** Clamp stand holding a boiling tube of copper carbonate, with a delivery tube into limewater. */
 function makeBoilingTubeRig() {
   const e = new Equip('boilingtube', 'Boiling tube in clamp', { radius: 0.09, movable: false, heatSafe: true });
@@ -1318,7 +1492,7 @@ function buildDeliveryTube(rig, limeTube) {
 /** Ions tracked in solution. z = charge. Coloured ions have a colour and a strength k (per mol/dm³). */
 const IONS = {
   'Na+': { z: 1, name: 'sodium' }, 'K+': { z: 1, name: 'potassium' }, 'Li+': { z: 1, name: 'lithium' },
-  'Ca2+': { z: 2, name: 'calcium' }, 'Ag+': { z: 1, name: 'silver' }, 'Ba2+': { z: 2, name: 'barium' },
+  'Ca2+': { z: 2, name: 'calcium' }, 'Mg2+': { z: 2, name: 'magnesium' }, 'Ag+': { z: 1, name: 'silver' }, 'Ba2+': { z: 2, name: 'barium' },
   // Ka: hydrated metal ions are weak acids, e.g. [Cu(H₂O)₆]²⁺ ⇌ [Cu(H₂O)₅OH]⁺ + H⁺
   'Cu2+': { z: 2, name: 'copper(II)', colour: '#2f80e3', k: 9, Ka: 3.2e-8 },
   'Fe3+': { z: 3, name: 'iron(III)', colour: '#c9861c', k: 16, Ka: 6.3e-3 },
@@ -1376,6 +1550,8 @@ const SUBSTANCES = {
   ui: { name: 'Universal indicator', short: 'Universal indicator', formula: 'indicator', formulaShort: 'Indicator', state: 'l', conc: 0, indicator: 'ui', hazards: ['Flammable (contains alcohol)'], colourName: 'green', liquidColor: 0x2e9b45, labelColor: '#2e7d32' },
   // solids
   cuco3: { name: 'Copper(II) carbonate', formula: 'CuCO₃(s)', state: 's', molar: 123.6, solidColor: '#3f9c70', hazards: ['Harmful if swallowed'], colourName: 'green' },
+  hcl_05: { name: 'Hydrochloric acid', formula: 'HCl(aq)', formulaShort: 'HCl 0.50 M', state: 'aq', conc: 0.5, ions: { 'Cl-': 1 }, hazards: ['Irritant'], colourName: 'colourless' },
+  mg: { name: 'Magnesium ribbon', formula: 'Mg(s)', state: 's', molar: 24.3, solidColor: '#c3c7cd', hazards: ['Flammable solid'], colourName: 'shiny grey' },
   cuo: { name: 'Copper(II) oxide', formula: 'CuO(s)', state: 's', molar: 79.5, solidColor: '#161616', hazards: ['Harmful to aquatic life'], colourName: 'black' },
   licl: { name: 'Lithium chloride', formula: 'LiCl(s)', state: 's', molar: 42.4, solidColor: '#f6f6f3', flameIon: 'Li+', hazards: ['Harmful if swallowed'] },
   nacl_s: { name: 'Sodium chloride', formula: 'NaCl(s)', state: 's', molar: 58.4, solidColor: '#fbfbfb', flameIon: 'Na+', hazards: [] },
@@ -1458,12 +1634,48 @@ const REACTIONS = [
     title: 'Thermal decomposition of copper(II) carbonate', observation: 'The green solid turned black and a gas was given off.',
     equation: 'CuCO₃(s) → CuO(s) + CO₂(g)', ionic: 'green solid → black solid + carbon dioxide',
     explain: 'Heat breaks copper(II) carbonate down into two simpler substances: black copper(II) oxide and carbon dioxide gas. Breaking a compound down with heat is called thermal decomposition. (The green powder sold as "copper carbonate" is really basic copper carbonate, CuCO₃·Cu(OH)₂, which also gives off a little water – but the products you see are the same.)' },
+  { id: 'mgacid', type: 'rate', solid: 'mg', products: { 'Mg2+': 1 }, gas: 'H2', k: 0.08, dH: -467000, effects: {},
+    title: 'Magnesium reacts with acid', observation: 'Fizzing – the magnesium ribbon got smaller and gave off a gas, and the flask got warmer.',
+    equation: 'Mg(s) + 2HCl(aq) → MgCl₂(aq) + H₂(g)', ionic: 'Mg(s) + 2H⁺(aq) → Mg²⁺(aq) + H₂(g)',
+    explain: 'Metals above hydrogen in the reactivity series react with acids to make a salt and hydrogen gas. The more acid particles there are in the same volume (higher concentration) – or the hotter it is – the more often they hit the magnesium, so the reaction goes faster.' },
+  { id: 'h2pop', type: 'test', effects: {},
+    title: 'The squeaky pop test for hydrogen', observation: 'The lighted splint gave a squeaky pop – the gas is hydrogen.',
+    equation: '2H₂(g) + O₂(g) → 2H₂O(l)', ionic: 'hydrogen + oxygen → water',
+    explain: 'Hydrogen mixed with air burns very quickly when a flame reaches it. The tiny explosion makes the "squeaky pop", and the product is water.' },
 ];
 for (const r of REACTIONS) {
   // how much "base" (OH⁻) one unit of reaction uses = total charge of the ions removed
   r.baseUse = r.requiresBase ? Object.entries(r.reactants).reduce((s, [k, n]) => s + n * (IONS[k]?.z ?? WEAK[k]?.z0 ?? 0), 0) : 0;
 }
 const REACTION_BY_ID = Object.fromEntries(REACTIONS.map(r => [r.id, r]));
+/**
+ * ELECTROLYSIS — what forms at each inert (graphite) electrode. The first rule whose "when" is true wins.
+ * Removing Cu²⁺ (or Cl⁻) from the solution changes the charge balance, so the pH changes by itself.
+ */
+const ELECTROLYSIS = {
+  cathode: [
+    { product: 'Cu', name: 'copper', when: (m, V) => (m.sp['Cu2+'] || 0) / V > 1e-3,
+      title: 'Copper forms at the cathode', half: 'Cu²⁺(aq) + 2e⁻ → Cu(s)', observation: 'A pink-brown coating of copper formed on the cathode (−).',
+      explain: 'Positive copper ions are attracted to the negative electrode. Each one gains two electrons and becomes copper metal. Gaining electrons is reduction.' },
+    { product: 'H2', gas: true, name: 'hydrogen', when: () => true,
+      title: 'Hydrogen forms at the cathode', half: '2H₂O(l) + 2e⁻ → H₂(g) + 2OH⁻(aq)', observation: 'Bubbles of hydrogen gas formed at the cathode (−).',
+      explain: 'When there are no ions of a less reactive metal to discharge, water is reduced at the cathode instead and hydrogen gas bubbles off.' },
+  ],
+  anode: [
+    { product: 'Cl2', gas: true, colour: '#c8e6a0', name: 'chlorine', when: (m, V) => (m.sp['Cl-'] || 0) / V >= 0.5,
+      title: 'Chlorine forms at the anode', half: '2Cl⁻(aq) → Cl₂(g) + 2e⁻', observation: 'Bubbles of pale green chlorine gas formed at the anode (+). Chlorine is toxic – this should be done in a fume hood.',
+      explain: 'In a concentrated chloride solution, chloride ions lose electrons at the positive electrode and form chlorine gas. Losing electrons is oxidation.' },
+    { product: 'O2', gas: true, name: 'oxygen', when: () => true,
+      title: 'Oxygen forms at the anode', half: '2H₂O(l) → O₂(g) + 4H⁺(aq) + 4e⁻', observation: 'Bubbles of oxygen gas formed at the anode (+).',
+      explain: 'Sulfate ions are not discharged, so water is oxidised at the positive electrode. Oxygen bubbles off and H⁺ ions are left behind, so the solution slowly becomes acidic.' },
+  ],
+};
+/** Chromatography: each dye moves a fixed fraction (Rf) of the distance the solvent moves. */
+const DYES = { blue: { Rf: 0.8, color: '#2563eb' }, yellow: { Rf: 0.55, color: '#eab308' }, red: { Rf: 0.25, color: '#dc2626' } };
+const INKS = { A: { name: 'Black ink', dyes: ['blue', 'yellow', 'red'] }, B: { name: 'Green ink', dyes: ['blue', 'yellow'] }, C: { name: 'Red food colouring', dyes: ['red'] }, D: { name: 'Unknown ink', dyes: ['yellow', 'red'] } };
+const INK_CODES = { yr: ['yellow', 'red'], br: ['blue', 'red'], by: ['blue', 'yellow'] };
+const FLAME_CODES = { Li: 'Li+', Na: 'Na+', K: 'K+', Ca: 'Ca2+', Cu: 'Cu2+' };
+
 
 /** Universal indicator colours for pH 0–14 (textbook chart). */
 const UI_COLOURS = ['#b5122a', '#d81e2a', '#ea3b25', '#f26722', '#f79a1e', '#f9c81a', '#d8d82b', '#4cb748', '#1b9d78', '#1f88c0', '#2560b0', '#33419c', '#4e2e8f', '#5f2484', '#5a1e6c'];
@@ -1609,6 +1821,35 @@ const Chem = {
     }
     return fired;
   },
+  /** Rate-controlled reaction of a solid with acid (magnesium ribbon): rate ∝ [H⁺] × surface area, doubling every 10 °C. */
+  kinetics(m, dt) {
+    const fired = [];
+    if (m.vol < 0.1) return fired;
+    for (const r of REACTIONS) {
+      if (r.type !== 'rate') continue;
+      const n = m.solid[r.solid] || 0;
+      if (n < 1e-10) continue;
+      const h = Math.pow(10, -this.pH(m)), n0 = m.solid0[r.solid] || n;
+      const rate = r.k * h * n0 * Math.pow(n / n0, 2 / 3) * Math.pow(2, (m.temp - 20) / 10);
+      let x = Math.min(n, rate * dt);
+      if (n - x < n0 * 1e-3) x = n;
+      if (x <= 0) continue;
+      m.solid[r.solid] = n - x;
+      for (const [k, c] of Object.entries(r.products)) m.sp[k] = (m.sp[k] || 0) + c * x;
+      m.temp += -r.dH * x / (Math.max(m.vol, 1) * 4.18);
+      m.touch();
+      fired.push({ rule: r, x, gas: x, rate });
+    }
+    return fired;
+  },
+  /** Current (A) through an electrolysis cell: more ions conduct better; pure water hardly conducts at all. */
+  current(m, volts) {
+    if (m.vol < 1) return 0;
+    const V = m.vol / 1000;
+    let s = 0;
+    for (const [k, n] of Object.entries(m.sp)) if (IONS[k]) s += Math.abs(IONS[k].z) * n / V;
+    return volts / (6 + 0.5 / Math.max(s, 1e-6));
+  },
   /** Heat-driven reactions of solids (called every frame). */
   thermal(m, dt) {
     const fired = [];
@@ -1704,7 +1945,7 @@ const S = {
   underBurette: null, lastDrop: null,
   titr: { points: [], dirty: true },
   explained: new Set(), logged: new Set(), warned: new Set(),
-  notebook: [], results: {}, t0: performance.now(),
+  notebook: [], results: {}, t0: performance.now(), simTime: 0, rates: { runs: [], current: null }, studentName: '',
 };
 
 /* ---------- Particle effects (bubbles, precipitate flakes, steam/smoke) ---------- */
@@ -2068,6 +2309,7 @@ function handleModeTarget(t) {
       if (t === sinkItem) { cancelMode(); return emptyToSink(src); }
       if (!t.container || t.kind === 'pipette') return say('You can only pour into a beaker, flask, test tube, measuring cylinder or burette.');
       if (t.container.infinite) return say('Never pour chemicals back into a stock bottle – it would contaminate it for everyone.');
+      if (t.bunged) return say('Take the bung out of the flask first.');
       if (t.kind === 'burette' && t.tap !== 'closed') return say('Close the burette tap before filling it.');
       if (t.container.free < 0.05) return say(`The ${t.name.toLowerCase()} is full.`);
       cancelMode(); openPourDialog(src, t); return;
@@ -2090,6 +2332,15 @@ function handleModeTarget(t) {
     case 'buretteFill': {
       if (t.kind !== 'reagent' && !(t.container && t.container.vol >= 1 && !['pipette', 'burette'].includes(t.kind))) return say('Fill the burette from a reagent bottle or a beaker of solution.');
       cancelMode(); requireGoggles(() => buretteFill(src, t)); return;
+    }
+    case 'addSolid': {
+      if (!t.container || t.container.infinite || ['pipette', 'burette', 'cylinder', 'dropper'].includes(t.kind)) return say('Add the solid to a beaker, flask or test tube.');
+      if (t.bunged) return say('Take the bung out first, add the magnesium, then put the bung back in quickly.');
+      cancelMode(); requireGoggles(() => addSolidPiece(src, t)); return;
+    }
+    case 'splint': {
+      if (t.kind !== 'syringe' && !t.container) return say('Hold the splint at the gas syringe or at the mouth of a fizzing flask.');
+      cancelMode(); requireGoggles(() => testWithSplint(src, t)); return;
     }
     case 'wireDip': {
       if (t.kind === 'watchglass') { cancelMode(); requireGoggles(() => dipWire(src, t)); return; }
@@ -2224,6 +2475,7 @@ async function doPour(src, tgt, amount) {
   renderCard();
 }
 function emptyToSink(src) {
+  if (src.bunged) return toast({ title: 'Take the bung out first', text: 'You cannot empty the flask with the bung in.', kind: 'warn', time: 3500 });
   if (!src.container || src.container.vol < 0.01) {
     if (src.container && Chem.solidGrams(src.container.m) > 0) { src.container.m.clearAll(); notebookLog(`Cleaned out the ${src.name.toLowerCase()}.`, 'action'); renderCard(); return; }
     return toast({ title: 'Nothing to empty', text: `The ${src.name.toLowerCase()} is already empty.`, kind: 'warn', time: 3000 });
@@ -2544,10 +2796,10 @@ async function holdInFlame(w) {
   else if (ions.length === 1) {
     const f = FLAME[ions[0]];
     obs = `${w.sampleName}: ${f.name} flame.`;
-    if (!w.contaminated) recordResult('flame', ions[0], { ion: ions[0], metal: f.metal, sample: w.sampleName, colour: f.name, hex: f.colour });
+    if (!w.contaminated) recordResult('flame', w.sampleName, { ion: ions[0], metal: f.metal, sample: w.sampleName, colour: f.name, hex: f.colour, unknown: w.sampleName === SUBSTANCES.unknownX?.name });
   } else obs = `Mixed flame colour (${ions.map(i => FLAME[i].metal).join(' + ')}) – the wire was contaminated.${ions.includes('Na+') ? ' Sodium\'s strong yellow hides other colours.' : ''}`;
   notebookLog(obs, ions.length ? 'obs' : 'action');
-  bus.emit('flameTest', { ions, ion: ions.length === 1 ? ions[0] : null, contaminated: !!w.contaminated, clean: w.clean });
+  bus.emit('flameTest', { ions, ion: ions.length === 1 ? ions[0] : null, contaminated: !!w.contaminated, clean: w.clean, sample: w.sampleName });
   await wireHome(w);
   S.busy--; renderCard();
 }
@@ -2575,6 +2827,208 @@ function routeGas(rig, n, dt) {
     for (let i = 0; i < rate; i++) if (Math.random() < 0.7) FX.bubbles.emit(V3(end.x + (Math.random() - .5) * 0.003, end.y, end.z + (Math.random() - .5) * 0.003), V3(0, 0.05 + Math.random() * 0.03, 0), WHITE, 2, { killY: surf, wobble: 0.01 });
     if (n > 1e-7 && !S.logged.has('limebubbles')) { S.logged.add('limebubbles'); notebookLog('Bubbles of gas are coming out of the delivery tube into the limewater.', 'obs'); }
   }
+}
+
+/* ---------- Solids, gas syringe and the hydrogen test (rates experiment) ---------- */
+async function addSolidPiece(dish, tgt) {
+  const sub = SUBSTANCES[dish.substance];
+  History.push(`Add ${sub.name.toLowerCase()}`);
+  S.busy++; renderCard();
+  const piece = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.0015, 0.004), new THREE.MeshStandardMaterial({ color: sub.solidColor, metalness: 0.6, roughness: 0.35 }));
+  const from = dish.group.localToWorld(V3(0, 0.03, 0)), mouth = tgt.mouthWorld(), bottom = tgt.container.surfaceWorld();
+  piece.position.copy(from); scene.add(piece);
+  const above = mouth.clone().add(V3(0, 0.04, 0));
+  await tween(0.6, t => { const e = ease(t); piece.position.lerpVectors(from, above, e); piece.position.y += Math.sin(Math.PI * e) * 0.05; });
+  await tween(0.35, t => { piece.position.y = lerp(above.y, bottom.y, t * t); piece.rotation.z = t * 2; });
+  scene.remove(piece); piece.geometry.dispose();
+  tgt.container.m.addSolid(dish.substance, dish.pieceMol);
+  S.busy--;
+  notebookLog(`Added a ${dish.pieceLabel} piece of ${sub.name.toLowerCase()} to the ${tgt.name.toLowerCase()}.`, 'action');
+  if (tgt.rigSyringe) startRateRun(tgt);
+  bus.emit('solidAdded', { source: dish, target: tgt, substance: dish.substance });
+  renderCard();
+}
+/** Connect the reaction flask to the gas syringe with a bung and delivery tube (shown when the bung is in). */
+function linkFlaskToSyringe(fl, syr) {
+  scene.updateMatrixWorld(true);
+  fl.rigSyringe = syr; fl.bunged = false;
+  fl.bungMesh = cyl(0.0165, 0.0145, 0.022, MAT.rubber, 16, 0, 0.13, 0); fl.bungMesh.visible = false; fl.group.add(fl.bungMesh);
+  const a = fl.group.localToWorld(V3(0, 0.141, 0)), b = syr.nozzleWorld();
+  const pts = [a, a.clone().add(V3(0, 0.07, 0)), V3((a.x + b.x) / 2, Math.max(a.y, b.y) + 0.09, (a.z + b.z) / 2), b.clone().add(V3(-0.04, 0.02, 0)), b];
+  fl.rateTube = glassMesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, false, 'centripetal'), 60, 0.0028, 8));
+  fl.rateTube.visible = false; scene.add(fl.rateTube); fl.extras.push(fl.rateTube);
+}
+function toggleBung(fl) {
+  fl.bunged = !fl.bunged;
+  fl.bungMesh.visible = fl.rateTube.visible = fl.bunged;
+  notebookLog(fl.bunged ? 'Put the bung and delivery tube into the flask.' : 'Took the bung out of the flask.', 'action');
+  bus.emit('bung', { inFlask: fl.bunged, reacting: (fl.container.m.solid.mg || 0) > 0 });
+  renderCard();
+}
+function resetSyringe(s) {
+  if (s.vol > 0) notebookLog('Pushed the gas syringe plunger back to 0 cm³.', 'action');
+  s.vol = 0; s.gas = null;
+  bus.emit('syringeReset'); renderCard();
+}
+function updateSyringe(s, dt) {
+  s.shownVol += (s.vol - s.shownVol) * Math.min(1, dt * 6);
+  s.plunger.position.x = s.x0 + (s.shownVol / 100) * s.len;
+}
+function acidConcIn(m) { return m.vol > 0.1 ? Chem.acidity(m) / (m.vol / 1000) : 0; }
+function startRateRun(fl) {
+  const run = { n: S.rates.runs.length + 1, conc: acidConcIn(fl.container.m), t0: S.simTime, v0: fl.rigSyringe.vol, points: [{ t: 0, v: fl.rigSyringe.vol }], done: false, tEnd: null };
+  S.rates.runs.push(run); S.rates.current = run; S.titr.dirty = true;
+}
+/** Record gas volume against time for the current run; the run ends 2 s after the magnesium is used up. */
+function updateRates(dt) {
+  const run = S.rates.current;
+  if (!run || run.done) return;
+  const fl = equipment.find(e => e.rigSyringe);
+  if (!fl) return;
+  const t = S.simTime - run.t0, last = run.points[run.points.length - 1];
+  if (t - last.t >= 0.5) { run.points.push({ t, v: fl.rigSyringe.vol }); S.titr.dirty = true; }
+  if ((fl.container.m.solid.mg || 0) > 0) return;
+  if (run.tEnd == null) run.tEnd = t;
+  if (t - run.tEnd < 2) return;
+  run.done = true; run.points.push({ t, v: fl.rigSyringe.vol }); run.total = fl.rigSyringe.vol - run.v0;
+  recordResult('rates', 'run' + run.n, { n: run.n, conc: run.conc, total: run.total, time: run.tEnd });
+  notebookLog(`Run ${run.n} (${fmt(run.conc, 2)} M acid): the fizzing stopped after ${Math.round(run.tEnd)} s; ${fmt(run.total, 0)} cm³ of gas collected.`, 'obs');
+  bus.emit('rateRunDone', { run: { n: run.n, conc: run.conc, total: run.total, time: run.tEnd } });
+}
+async function testWithSplint(sp, t) {
+  const syr = t.kind === 'syringe' ? t : null;
+  const hasH2 = syr ? syr.vol > 5 && syr.gas === 'H2' : !!(t.container && S.simTime - (t.h2Time ?? -99) < 1.5);
+  S.busy++; renderCard();
+  const g = sp.group, home = g.position.clone();
+  const at = syr ? syr.nozzleWorld() : t.mouthWorld().add(V3(0, 0.012, 0));
+  const tipOff = sp.tipLocal.clone().applyAxisAngle(V3(0, 1, 0), Math.PI);
+  sp.flame.visible = true; g.rotation.y = Math.PI;
+  await moveGroup(g, at.clone().sub(tipOff).add(V3(0, 0.05, 0)), 0.6);
+  await moveGroup(g, at.clone().sub(tipOff), 0.3);
+  if (hasH2) {
+    const flash = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({ color: 0xffe08a, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
+    flash.position.copy(at); flash.renderOrder = 5; scene.add(flash);
+    await tween(0.35, k => { flash.scale.setScalar(0.005 + 0.05 * k); flash.material.opacity = 0.9 * (1 - k); });
+    scene.remove(flash); flash.geometry.dispose();
+    sp.flame.visible = false;
+    if (syr) { syr.vol = 0; syr.gas = null; }
+    toast({ title: 'POP!', text: 'A squeaky pop – the gas is hydrogen.', kind: 'ok', time: 4000 });
+    onReaction(syr || t, REACTION_BY_ID.h2pop, 0);
+    recordResult('gastest', 'h2', { target: (syr || t).name, result: 'lighted splint gave a squeaky pop – hydrogen' });
+  } else {
+    await wait(1.0);
+    toast({ title: 'No pop', text: 'The splint just kept burning – there was no hydrogen there to test.', time: 4000 });
+    notebookLog('The lighted splint kept burning – no hydrogen was detected.', 'obs');
+  }
+  await wait(0.3);
+  sp.flame.visible = false;
+  await moveGroup(g, home, 0.6); g.rotation.y = 0;
+  S.busy--;
+  bus.emit('popTest', { pop: hasH2, target: t });
+  renderCard();
+}
+
+/* ---------- Electrolysis ---------- */
+function togglePower(p) {
+  if (!p.on) {
+    if (!S.goggles) return requireGoggles(() => togglePower(p));
+    const c = p.cell?.container;
+    if (!c || c.vol < 1 || c.level() < 0.02) return toast({ title: 'Fill the cell first', text: 'Both electrodes must dip into the solution before you switch on.', kind: 'warn', time: 4000 });
+  }
+  p.on = !p.on; p.redrawDisplay();
+  notebookLog(p.on ? `Switched the power pack on at ${p.volts} V.` : 'Switched the power pack off.', 'action');
+  bus.emit('power', { on: p.on, volts: p.volts });
+  renderCard();
+}
+function setVolts(p, v) { p.volts = v; p.redrawDisplay(); bus.emit('power', { on: p.on, volts: v }); renderCard(); }
+function electrodeBubbles(cell, local, n, color = WHITE) {
+  const surf = cell.container.surfaceWorld().y;
+  for (let i = 0; i < n; i++) {
+    const p = cell.group.localToWorld(local.clone().add(V3((Math.random() - 0.5) * 0.006, Math.random() * 0.012, (Math.random() - 0.5) * 0.006)));
+    if (p.y < surf) FX.bubbles.emit(p, V3(0, 0.04 + Math.random() * 0.02, 0), color, 3, { killY: surf, wobble: 0.01 });
+  }
+}
+/** Each frame: current from the conductivity, products from the ELECTROLYSIS rules, then effects and notes. */
+function updateElectrolysis(p, dt) {
+  const cell = p.cell; if (!cell) return;
+  const c = cell.container, m = c.m;
+  const amps = p.on && c.level() > 0.02 ? Chem.current(m, p.volts) : 0;
+  if (Math.abs(amps - p.amps) > 0.004) { p.amps = amps; p.redrawDisplay(); }
+  if (amps < 0.01) return;
+  const V = m.vol / 1000, el = amps * dt / 96485;   // moles of electrons this frame
+  const cRule = ELECTROLYSIS.cathode.find(r => r.when(m, V)), aRule = ELECTROLYSIS.anode.find(r => r.when(m, V));
+  if (cRule.product === 'Cu') { const x = Math.min(m.sp['Cu2+'] || 0, el / 2); m.sp['Cu2+'] -= x; cell.deposit += x; m.touch(); }
+  if (aRule.product === 'Cl2') { m.sp['Cl-'] = Math.max(0, (m.sp['Cl-'] || 0) - el); m.touch(); }
+  const n = () => Math.floor(amps * dt * 40 + Math.random());
+  if (cRule.gas) electrodeBubbles(cell, cell.cathodeLocal, n());
+  if (aRule.gas) electrodeBubbles(cell, cell.anodeLocal, n(), aRule.colour ? new THREE.Color(aRule.colour) : WHITE);
+  cell.sleeve.visible = cell.deposit > 1e-6;
+  cell.sleeve.material.opacity = clamp(cell.deposit / 1.2e-4, 0, 1);
+  for (const [r, side] of [[cRule, 'cathode'], [aRule, 'anode']]) {
+    const key = `el:${side}:${r.product}:${cell.id}`;
+    if (S.logged.has(key) || (r.product === 'Cu' && cell.deposit < 2e-5)) continue;
+    S.logged.add(key);
+    notebookLog(r.observation, 'obs');
+    if (!S.explained.has('el' + r.product)) { S.explained.add('el' + r.product); toast({ title: r.title, eq: r.half, text: r.explain, time: 12000 }); }
+    recordResult('electrolysis', side, { side, product: r.name });
+    bus.emit('electrode', { side, product: r.product });
+  }
+}
+
+/* ---------- Chromatography ---------- */
+function placePaper(p, hung) {
+  if (hung) { p.group.position.copy(p.beaker.group.localToWorld(V3(0, 0.0046, 0))); p.group.rotation.set(0, 0, 0); }
+  else { p.group.position.copy(p.home).setY(BENCH_Y + 0.001); p.group.rotation.set(-Math.PI / 2, 0, 0); }
+}
+function hangPaper(p) {
+  if (p.done || p.washed) return toast({ title: 'Use a new paper', text: 'This paper has already been used.', kind: 'warn', time: 3500 });
+  p.hung = true; placePaper(p, true);
+  updateChroma(p, 0);
+  notebookLog('Hung the chromatography paper in the beaker.', 'action');
+  bus.emit('paperHung', { washed: p.washed });
+  renderCard();
+}
+function takeOutPaper(p) {
+  p.hung = false; placePaper(p, false);
+  const dist = Math.max(0, p.front - p.baseline) * 100, round1 = v => Math.round(v * 10) / 10;
+  if (!p.washed && dist > 0.5) {
+    p.done = true;
+    const front = round1(dist), inks = {}, spots = [];
+    for (const [k, ink] of Object.entries(p.inks)) { inks[k] = ink.dyes.map(d => ({ dye: d, d: round1(DYES[d].Rf * dist) })); inks[k].forEach(s => spots.push({ ink: k, ...s })); }
+    S.results.chroma = { front, inks, spots }; nbDirty = true;
+    notebookLog(`Took the paper out. The solvent front moved ${fmt(front, 1)} cm from the pencil line; the inks separated into coloured spots.`, 'obs');
+  } else notebookLog('Took the paper out of the beaker.', 'action');
+  bus.emit('paperOut', { dist, washed: p.washed });
+  renderCard();
+}
+function newPaper(p) {
+  Object.assign(p, { front: 0, washed: false, done: false, hung: false });
+  placePaper(p, false); p.redraw();
+  notebookLog('Took a new piece of chromatography paper.', 'action');
+  renderCard();
+}
+/** Solvent creeps up the paper (front² grows steadily with time) and carries each dye a fraction Rf of the way. */
+function updateChroma(p, dt) {
+  if (!p.hung) return;
+  const c = p.beaker.container, depth = (c.vol > 0.1 ? c.level() : 0) - 0.003;
+  if (depth <= 0) return;
+  if (depth >= p.baseline - 0.001 && !p.washed) {
+    p.washed = true;
+    notebookLog('The solvent was above the pencil line, so the inks dissolved into the solvent instead of moving up the paper.', 'warn');
+    toast({ title: 'The inks washed off!', text: 'The solvent must stay below the pencil line. Take the paper out, empty the beaker, use less solvent (about 20 cm³) and a new paper.', kind: 'warn', time: 7000 });
+    bus.emit('paperWashed');
+  }
+  if (p.front < depth) p.front = depth;
+  if (p.front < 0.1) p.front = Math.min(0.1, Math.sqrt(p.front * p.front + 1.6e-4 * dt));
+  if (Math.abs(p.front - p.lastDrawn) > 0.0006) p.redraw();
+  if (p.front >= 0.1 && !S.logged.has('chromaTop' + p.id)) { S.logged.add('chromaTop' + p.id); notebookLog('The solvent front has nearly reached the top of the paper.', 'obs'); }
+}
+function paperStatusHTML(p) {
+  const r = S.results.chroma;
+  if (p.hung) return `Solvent front: <b>${fmt(Math.max(0, p.front - p.baseline) * 100, 1)} cm</b> above the pencil line`;
+  if (p.washed) return 'The inks washed into the solvent – it was above the pencil line. Use a new paper.';
+  if (p.done && r) return `<b>Measured from the pencil line:</b><br>Solvent front: <b>${fmt(r.front, 1)} cm</b><br>${Object.entries(r.inks).map(([k, s]) => `${k}: ${s.map(x => `${x.dye} ${fmt(x.d, 1)} cm`).join(', ')}`).join('<br>')}`;
+  return 'Dry paper with four ink spots (A–D) on a pencil line.';
 }
 
 /* ---------- Heating simulation (every frame) ---------- */
@@ -2623,6 +3077,13 @@ function updateHeat(e, dt) {
       if (e.kind === 'boilingtube') routeGas(e, f.gas, dt);
       e.decompProgress = f.progress;
     }
+    for (const f of Chem.kinetics(m, dt)) {
+      onReaction(e, f.rule, f.x);
+      const n = Math.floor(f.rate * dt * 6e5 + Math.random());
+      if (n > 0) emitBubbles(e, Math.min(n, 8));
+      e.h2Time = S.simTime;
+      if (e.bunged && e.rigSyringe) e.rigSyringe.collect(f.gas, f.rule.gas);
+    }
   }
 }
 
@@ -2666,7 +3127,7 @@ function updateHover() {
   canvas.style.cursor = item ? (S.mode ? 'copy' : (item.movable || item.parentEquip?.movable ? 'grab' : 'pointer')) : 'default';
   if (!item) { tooltipEl.classList.remove('show'); return; }
   let sub = '';
-  if (S.mode) sub = { pour: 'Pour into this', drops: 'Add drops here', pipetteFill: 'Fill pipette from this', pipetteRelease: 'Release pipette here', buretteFill: 'Fill burette from this', wireDip: 'Dip wire here' }[S.mode.type];
+  if (S.mode) sub = { pour: 'Pour into this', drops: 'Add drops here', pipetteFill: 'Fill pipette from this', pipetteRelease: 'Release pipette here', buretteFill: 'Fill burette from this', wireDip: 'Dip wire here', addSolid: 'Add a piece here', splint: 'Test the gas here' }[S.mode.type];
   else if (item.container && !item.container.infinite && item.kind !== 'dropper') {
     const v = item.container.vol, pH = Chem.pH(item.container.m);
     sub = v > 0.001 ? `${fmt(v, v < 10 ? 2 : 1)} cm³${pH != null ? ' · pH ' + fmt(pH, 1) : ''}` : (Chem.solidGrams(item.container.m) > 0 ? 'contains a solid' : 'empty');
@@ -2707,6 +3168,7 @@ function labelledTube(label, fullName, subId, vol) {
   return t;
 }
 
+const knownFlameDone = ion => Object.values(S.results.flame || {}).some(r => r.ion === ion && !r.unknown);
 const EXPERIMENTS = [
   /* ------------------------------------------------------------------ */
   {
@@ -2728,6 +3190,8 @@ const EXPERIMENTS = [
       ['hcl', 'naoh', 'water', 'nacl', 'cuso4', 'fecl3', 'limewater', 'nahco3', 'ethanol', 'ki'].forEach((id, i) => addEquip(makeReagent(id), -1.52 + i * 0.08, -0.22));
       ['php', 'ui', 'agno3', 'naoh_drop'].forEach((id, i) => addEquip(makeDropper(id), 0.08 + i * 0.065, 0.45));
       addEquip(makeChart(), 1.3, -0.16);
+      addEquip(makeSolidDish('mg', 0.05 / 24.3, '5 cm'), -0.15, 0.45);
+      addEquip(makeSplint(), -0.3, 0.5);
       addEquip(makeGoggles(), 1.38, 0.4);
     },
     steps: [],
@@ -2740,9 +3204,10 @@ const EXPERIMENTS = [
     aim: 'To find the exact concentration of a hydrochloric acid solution by titrating 25.0 cm³ of it with 0.100 mol/dm³ sodium hydroxide, using phenolphthalein as the indicator. You will do a quick rough run, then accurate runs until two titres agree within 0.10 cm³ (concordant results).',
     equipment: ['Burette on a clamp stand', 'White tile', '25.0 cm³ pipette with filler', 'Conical flask', 'Phenolphthalein indicator', 'Sodium hydroxide, 0.100 mol/dm³', 'Hydrochloric acid (unknown concentration)', 'Safety goggles'],
     safety: ['Sodium hydroxide and hydrochloric acid are irritants – wear goggles to protect your eyes.', 'Always use a pipette filler. Never pipette by mouth.', 'Fill the burette below eye level using a funnel, then remove the funnel.', 'Phenolphthalein is dissolved in ethanol, which is flammable.'],
-    readouts: true,
+    readouts: 'titration',
+    reportResult: () => { const c = S.results.calc; return c ? `HCl concentration ${fmt(c.conc, 4)} mol/dm³ (true value ${fmt(c.real, 4)}; ${fmt(Math.abs(c.conc - c.real) / c.real * 100, 1)}% error)` : 'concentration not calculated yet'; },
     setup() {
-      SUBSTANCES.hcl_unknown.conc = +(0.085 + Math.random() * 0.03).toFixed(4);
+      SUBSTANCES.hcl_unknown.conc = TEACHER.hcl ?? +(0.085 + Math.random() * 0.03).toFixed(4);
       addEquip(makeBurette(), 0.05, -0.12);
       addEquip(makeReagent('naoh', 'Sodium hydroxide (0.100 M)'), -0.55, -0.2);
       addEquip(makeReagent('hcl_unknown'), -0.8, -0.2);
@@ -2834,7 +3299,7 @@ const EXPERIMENTS = [
   },
   /* ------------------------------------------------------------------ */
   {
-    id: 'flame', num: 2, title: 'Flame tests for metal ions', short: 'Flame tests',
+    id: 'flame', num: 2, reportResult: () => S.results.flameAnswer ? 'Unknown sample X identified correctly' : 'Unknown sample X not identified yet', title: 'Flame tests for metal ions', short: 'Flame tests',
     sub: 'Identify metal ions from the colour they give to a flame.',
     aim: 'To see the characteristic flame colours of lithium, sodium, potassium, calcium and copper(II) ions, and use them to identify metal ions.',
     equipment: ['Bunsen burner', 'Nichrome wire loop', 'Dilute hydrochloric acid (for cleaning)', 'Watch glasses of LiCl, NaCl, KCl, CaCl₂ and CuCl₂', 'Safety goggles'],
@@ -2845,6 +3310,9 @@ const EXPERIMENTS = [
       const b = addEquip(makeBeaker(100, 'Beaker of dilute hydrochloric acid (for cleaning)'), 0.3, -0.1);
       b.container.m.addSolution('hcl_clean', 40);
       ['licl', 'nacl_s', 'kcl', 'cacl2', 'cucl2'].forEach((id, i) => addEquip(makeWatchGlass(id), -0.92 + i * 0.105, 0.3));
+      const ion = TEACHER.flame !== 'random' ? FLAME_CODES[TEACHER.flame] : Object.keys(FLAME)[Math.floor(Math.random() * 5)];
+      SUBSTANCES.unknownX = { name: 'Unknown sample X', formula: 'X (unknown)', formulaShort: 'X', state: 's', molar: 100, solidColor: ion === 'Cu2+' ? '#3fae9c' : '#f3f3f0', flameIon: ion, hazards: ['Treat as harmful'], unknown: true };
+      addEquip(makeWatchGlass('unknownX'), -0.92 + 5 * 0.105, 0.3);
       addEquip(makeGoggles(), 1.2, 0.38);
     },
     steps: [
@@ -2855,11 +3323,22 @@ const EXPERIMENTS = [
       {
         text: 'Test all five samples. For each one: dip the clean wire in the solid, hold it in the flame, then clean the wire in the acid again.',
         hint: 'Wire loop → "Dip into…" → click a watch glass → "Hold in flame". Then dip into the acid to clean it before the next sample. Potassium\'s lilac is pale – look carefully.',
-        progress: () => ['Li+', 'Na+', 'K+', 'Ca2+', 'Cu2+'].map(i => (S.results.flame?.[i] ? '✓ ' : '○ ') + FLAME[i].metal).join(' · '),
+        progress: () => ['Li+', 'Na+', 'K+', 'Ca2+', 'Cu2+'].map(i => (knownFlameDone(i) ? '✓ ' : '○ ') + FLAME[i].metal).join(' · '),
         check: ev => {
           if (ev.type === 'flameTest' && ev.contaminated) return { fail: 'That result is not reliable – the wire was not cleaned between samples. Clean it in the acid and test again.' };
-          if (ev.type === 'flameTest' || ev.type === 'enter') return ['Li+', 'Na+', 'K+', 'Ca2+', 'Cu2+'].every(i => S.results.flame?.[i]);
+          if (ev.type === 'flameTest' || ev.type === 'enter') return ['Li+', 'Na+', 'K+', 'Ca2+', 'Cu2+'].every(knownFlameDone);
         },
+      },
+      {
+        text: 'Now test the unknown sample X in the same way (clean the wire first).',
+        hint: 'Dip the clean wire into watch glass X, hold it in the flame and compare the colour with your results table.',
+        check: ev => { if (ev.type !== 'flameTest' || ev.sample !== SUBSTANCES.unknownX?.name) return; return ev.contaminated ? { fail: 'The wire was not clean, so the colour is mixed. Clean it in the acid and test X again.' } : true; },
+      },
+      {
+        type: 'choice', text: 'Which metal ion is in the unknown sample X?', options: ['Lithium, Li⁺', 'Sodium, Na⁺', 'Potassium, K⁺', 'Calcium, Ca²⁺', 'Copper(II), Cu²⁺'],
+        answer: () => Object.keys(FLAME).indexOf(SUBSTANCES.unknownX.flameIon),
+        explain: 'You identified X by matching its flame colour to the known samples – exactly how chemists use flame tests.',
+        onPass: () => { const r = Object.values(S.results.flame || {}).find(x => x.unknown); if (r) r.revealed = true; S.results.flameAnswer = true; nbDirty = true; },
       },
       { text: 'Turn off the Bunsen burner.', hint: 'Select the Bunsen burner and press "Turn off".', check: () => !find('bunsen', b => b.on) },
     ],
@@ -3000,6 +3479,166 @@ const EXPERIMENTS = [
       { q: 'Why must the delivery tube be lifted out of the limewater before heating stops?', options: ['To stop cold limewater being sucked back into the hot tube and cracking it', 'To let more gas escape', 'To make the limewater milky', 'To cool the Bunsen burner'], answer: 0, explain: 'As the tube cools, the gas inside contracts and the pressure drops, which can pull limewater back into the hot glass ("suck-back").' },
     ],
   },
+  /* ------------------------------------------------------------------ */
+  {
+    id: 'rates', num: 6, title: 'Rates of reaction: magnesium and acid', short: 'Rates',
+    sub: 'Collect hydrogen in a gas syringe and see how concentration changes the rate.',
+    aim: 'To measure the volume of hydrogen made when magnesium reacts with hydrochloric acid, to compare the rate with 1.0 M and 0.50 M acid, and to test the gas with a lighted splint.',
+    equipment: ['Conical flask with bung and delivery tube', 'Gas syringe (100 cm³) on a clamp stand', 'Measuring cylinder', 'Hydrochloric acid, 1.0 M and 0.50 M', 'Magnesium ribbon (5 cm pieces)', 'Wooden splint', 'Safety goggles'],
+    safety: ['Wear goggles – hydrochloric acid is an irritant.', 'Hydrogen is flammable: keep flames away except for the small splint test.', 'Magnesium is a flammable solid – keep it away from flames.', 'Do not let the gas syringe overfill – the plunger can be pushed out.'],
+    readouts: 'rates', speedUp: true,
+    reportResult: () => { const r = Object.values(S.results.rates || {}); return r.length ? r.map(x => `${fmt(x.conc, 2)} M: ${fmt(x.total, 0)} cm³ in ${Math.round(x.time)} s`).join('; ') : 'no runs yet'; },
+    setup() {
+      const fl = addEquip(makeFlask('Conical flask (reaction flask)'), -0.15, 0.12); fl.movable = false;
+      const syr = addEquip(makeGasSyringe(), 0.2, 0.0);
+      linkFlaskToSyringe(fl, syr);
+      addEquip(makeCylinder(), -0.5, 0.25);
+      addEquip(makeReagent('hcl_clean', 'Hydrochloric acid (1.0 M)'), -0.75, -0.2);
+      addEquip(makeReagent('hcl_05', 'Hydrochloric acid (0.50 M)'), -0.95, -0.2);
+      addEquip(makeSolidDish('mg', 0.05 / 24.3, '5 cm'), 0.05, 0.4);
+      addEquip(makeSplint(), 0.45, 0.36);
+      addEquip(makeGoggles(), 1.2, 0.38);
+    },
+    steps: [
+      gogglesStep,
+      {
+        text: 'Use the measuring cylinder to measure 25 cm³ of 1.0 M hydrochloric acid.',
+        hint: 'Select the 1.0 M acid bottle → "Pour into…" → click the measuring cylinder → 25 cm³.',
+        check: () => { if (S.busy) return; const v = find('cylinder')?.container.m.added.hcl_clean || 0; return v >= 24 && v <= 26; },   // wait until the pour has finished
+      },
+      {
+        text: 'Pour the acid from the measuring cylinder into the reaction flask.',
+        hint: 'Select the measuring cylinder → "Pour into…" → click the conical flask → "All".',
+        check: () => !S.busy && (equipment.find(e => e.rigSyringe)?.container.m.added.hcl_clean || 0) >= 24,
+      },
+      {
+        text: 'Add a piece of magnesium ribbon to the flask, then put the bung in straight away.',
+        hint: 'Select the magnesium dish → "Add a piece to…" → click the flask. Then select the flask → "Put bung in". Be quick, or some gas escapes before it can be collected!',
+        check: ev => { if (ev.type !== 'bung' || !ev.inFlask) return; return ev.reacting ? { pass: true, note: 'The gas now goes into the gas syringe. Watch the volume and the graph below.' } : { fail: 'Add the magnesium first, then put the bung in straight away.' }; },
+      },
+      {
+        text: 'Watch the gas syringe until the fizzing stops.',
+        hint: 'Use ⏩ to speed up time if you like. The graph shows the volume of gas against time.',
+        progress: () => { const s = find('syringe'); return s ? `Gas collected: ${fmt(s.vol, 1)} cm³` : ''; },
+        check: ev => ev.type === 'rateRunDone' ? { pass: true, note: `Gas collected: ${fmt(ev.run.total, 0)} cm³ in ${Math.round(ev.run.time)} s.` } : undefined,
+      },
+      {
+        text: 'Repeat with 0.50 M acid: take the bung out, empty the flask, reset the syringe, measure 25 cm³ of 0.50 M acid, add a new piece of magnesium and bung it.',
+        hint: 'Flask → "Take bung out" → "Empty in sink". Syringe → "Reset to 0 cm³". Then measure the 0.50 M acid with the measuring cylinder and pour it into the flask.',
+        check: ev => { if (ev.type !== 'rateRunDone') return; return ev.run.conc > 0.3 && ev.run.conc < 0.7 ? { pass: true, note: 'Compare the two lines on the graph.' } : { fail: 'That run did not use 0.50 M acid. Empty the flask and repeat with 25 cm³ of the 0.50 M acid.' }; },
+      },
+      { type: 'choice', text: 'Look at the graph. Which acid made gas faster at the start?', options: ['1.0 M – its line is steeper at the start', '0.50 M – its line is steeper at the start', 'Both were exactly the same'], answer: 0, explain: 'A steeper line means a faster reaction. More concentrated acid has more H⁺ particles in the same volume, so they collide with the magnesium more often.' },
+      { type: 'choice', text: 'Why did both runs give about the same total volume of gas?', options: ['The same amount of magnesium was used, and the acid was in excess both times', 'The syringe was full', 'Both acids had the same concentration'], answer: 0, explain: 'The magnesium was used up both times – it was the limiting reactant. The amount of product depends on the limiting reactant, not on how fast it reacts.' },
+      {
+        text: 'Test the gas: hold a lighted splint at the nozzle of the gas syringe.',
+        hint: 'Select the splint → "Light & test gas…" → click the gas syringe. (If it is empty, run the reaction again first.)',
+        check: ev => ev.type === 'popTest' ? (ev.pop ? { pass: true, note: 'Squeaky pop – the gas is hydrogen!' } : { fail: 'No pop – there was no hydrogen there. Test the syringe when it has gas in it.' }) : undefined,
+      },
+    ],
+    quiz: [
+      { q: 'Which test shows that a gas is hydrogen?', options: ['A lighted splint gives a squeaky pop', 'A glowing splint relights', 'It turns limewater milky', 'It bleaches damp litmus paper'], answer: 0, explain: 'Hydrogen burns with a squeaky pop. A glowing splint relighting is the test for oxygen; limewater is for carbon dioxide; bleaching litmus is for chlorine.' },
+      { q: 'Why does a higher temperature speed up a reaction?', options: ['Particles move faster, so they collide more often and with more energy', 'The particles get bigger', 'More particles are made', 'The acid becomes stronger'], answer: 0, explain: 'Faster particles collide more often, and more of the collisions have enough energy to react (the activation energy).' },
+      { q: 'What does the gradient (steepness) of a volume–time graph show?', options: ['The rate of reaction', 'The total volume of gas', 'The temperature', 'The mass of magnesium'], answer: 0, explain: 'Rate = change in volume ÷ time, which is the gradient of the graph.' },
+    ],
+  },
+  /* ------------------------------------------------------------------ */
+  {
+    id: 'electrolysis', num: 7, title: 'Electrolysis of copper(II) sulfate', short: 'Electrolysis',
+    sub: 'Use electricity to split copper(II) sulfate solution at graphite electrodes.',
+    aim: 'To electrolyse copper(II) sulfate solution with inert graphite electrodes, identify the product at each electrode, and explain the changes using half-equations.',
+    equipment: ['Beaker with two graphite electrodes', 'Low-voltage DC power pack and leads', 'Copper(II) sulfate solution, 0.1 M', 'Universal indicator (to check the solution afterwards)', 'Safety goggles'],
+    safety: ['Wear goggles – copper(II) sulfate is harmful and an irritant.', 'Use only a low-voltage power pack (12 V or less), never the mains.', 'Switch off before touching the electrodes or leads.', 'With chloride solutions, toxic chlorine can form – use a fume hood.'],
+    speedUp: true,
+    reportResult: () => { const r = S.results.electrolysis || {}; return r.cathode ? `cathode: ${r.cathode.product}; anode: ${r.anode?.product || '–'}` : 'not run yet'; },
+    setup() {
+      const cell = addEquip(makeElectrolysisCell(), -0.12, 0.1);
+      const pack = addEquip(makePowerPack(), 0.24, 0.04);
+      buildWires(pack, cell);
+      addEquip(makeReagent('cuso4'), -0.6, -0.2);
+      addEquip(makeDropper('ui'), 0.46, 0.36);
+      addEquip(makeGoggles(), 1.2, 0.38);
+    },
+    steps: [
+      gogglesStep,
+      {
+        text: 'Pour about 80 cm³ of copper(II) sulfate solution into the electrolysis cell, so both electrodes dip into it.',
+        hint: 'Select the copper(II) sulfate bottle → "Pour into…" → click the electrolysis beaker → move the slider to 80 cm³.',
+        check: () => { if (S.busy) return; const c = find('beaker', b => b.cell); return !!c && (c.container.m.added.cuso4 || 0) >= 60 && c.container.level() > 0.02; },
+      },
+      { text: 'Set the power pack to 6 V and switch it on.', hint: 'Select the power pack → choose 6 V → "Switch on".', check: () => !!find('powerpack', p => p.on) },
+      {
+        text: 'Watch both electrodes for about a minute.',
+        hint: 'Zoom in on the beaker. Use ⏩ to speed up time if you like.', poll: true,
+        progress: () => { const c = find('beaker', b => b.cell); return c ? `Copper deposited: ${fmt(c.deposit * 63.5 * 1000, 1)} mg` : ''; },
+        check: () => { const c = find('beaker', b => b.cell); return !!c && c.deposit >= 1.5e-4 && !!S.results.electrolysis?.anode; },
+      },
+      { type: 'choice', text: 'What formed on the negative electrode (cathode)?', options: ['Copper metal', 'Oxygen gas', 'Hydrogen gas', 'Sulfur'], answer: 0, explain: 'Cu²⁺ ions gain electrons at the cathode: Cu²⁺ + 2e⁻ → Cu. The pink-brown coating is copper.' },
+      { type: 'choice', text: 'Which gas bubbled off at the positive electrode (anode)?', options: ['Oxygen', 'Hydrogen', 'Chlorine', 'Carbon dioxide'], answer: 0, explain: 'Sulfate ions are not discharged, so water is oxidised instead: 2H₂O → O₂ + 4H⁺ + 4e⁻.' },
+      { text: 'Switch off the power pack.', hint: 'Select the power pack → "Switch off".', check: () => !find('powerpack', p => p.on) },
+      { type: 'next', text: 'Copper ions were removed from the solution, so its blue colour faded a little. The H⁺ ions made at the anode turned it acidic – it is now dilute sulfuric acid.', hint: 'Click the beaker to see the new pH, or add universal indicator.' },
+    ],
+    quiz: [
+      { q: 'Which half-equation shows what happens at the cathode?', options: ['Cu²⁺ + 2e⁻ → Cu', 'Cu → Cu²⁺ + 2e⁻', '2H₂O → O₂ + 4H⁺ + 4e⁻', 'SO₄²⁻ → SO₂ + O₂'], answer: 0, explain: 'Positive ions gain electrons at the negative electrode.' },
+      { q: 'Gaining electrons is called…', options: ['Reduction', 'Oxidation', 'Neutralisation', 'Combustion'], answer: 0, explain: 'OIL RIG: Oxidation Is Loss, Reduction Is Gain (of electrons).' },
+      { q: 'Why did the blue colour of the solution fade?', options: ['Blue Cu²⁺ ions were removed as copper metal', 'The electrodes absorbed the colour', 'Oxygen bleached it', 'The solution got hotter'], answer: 0, explain: 'The blue colour comes from Cu²⁺(aq). As copper plates onto the cathode, fewer Cu²⁺ ions are left.' },
+    ],
+  },
+  /* ------------------------------------------------------------------ */
+  {
+    id: 'chroma', num: 8, title: 'Paper chromatography of inks', short: 'Chromatography',
+    sub: 'Separate the dyes in inks and calculate Rf values.',
+    aim: 'To separate the dyes in four inks by paper chromatography, calculate an Rf value, and use the chromatogram to find which dyes are in an unknown ink.',
+    equipment: ['Beaker (chromatography tank) with a glass rod', 'Chromatography paper with a pencil line and ink spots A–D', 'Distilled water (the solvent)', 'Ruler', 'Safety goggles'],
+    safety: ['Wear goggles as normal practice.', 'Keep the solvent level below the pencil line.', 'Some inks and solvents stain – wash any spills.'],
+    speedUp: true,
+    reportResult: () => S.results.chromaRf != null ? `Rf of the yellow dye: ${fmt(S.results.chromaRf, 2)}${S.results.chromaAnswer ? '; unknown ink identified' : ''}` : 'Rf not calculated yet',
+    setup() {
+      const bk = addEquip(makeBeaker(250, 'Beaker (chromatography tank)'), -0.05, 0.08); bk.movable = false;
+      const rod = cyl(0.0025, 0.0025, 0.09, MAT.glass, 10, 0, 0.098, 0); rod.rotation.z = Math.PI / 2; rod.castShadow = false; rod.renderOrder = 2; bk.group.add(rod);
+      const p = addEquip(makeChromaPaper(bk), 0.25, 0.22);
+      const combo = TEACHER.ink !== 'random' ? TEACHER.ink : ['yr', 'br', 'by'][Math.floor(Math.random() * 3)];
+      p.inks.D.dyes = INK_CODES[combo].slice(); p.redraw();
+      placePaper(p, false);
+      addEquip(makeReagent('water'), -0.5, -0.2);
+      addEquip(makeGoggles(), 1.2, 0.38);
+    },
+    steps: [
+      gogglesStep,
+      {
+        text: 'Pour about 20 cm³ of water (the solvent) into the beaker. It must stay below the pencil line on the paper.',
+        hint: 'Select the distilled water bottle → "Pour into…" → click the beaker → 20 cm³.',
+        check: () => { if (S.busy) return; const v = find('beaker')?.container.m.vol || 0; if (v > 45) return { fail: 'That is too deep – the solvent would cover the pencil line and wash the inks off. Empty the beaker (select it → "Empty in sink") and use about 20 cm³.' }; return v >= 10; },
+      },
+      {
+        text: 'Hang the chromatography paper in the beaker, with its bottom edge in the water.',
+        hint: 'Select the paper → "Hang in the beaker".',
+        check: ev => { if (ev.type !== 'paperHung') return; return ev.washed ? { fail: 'The solvent covered the pencil line and the inks washed off. Take the paper out, empty the beaker, use less water and a new paper.' } : true; },
+      },
+      {
+        text: 'Watch the solvent rise up the paper and carry the inks with it. Take the paper out when the solvent is near the top.',
+        hint: 'Use ⏩ to speed up time. Select the paper → "Take it out" when the solvent front is about 8 cm above the pencil line.',
+        progress: () => { const p = find('paper'); return p ? `Solvent front: ${fmt(Math.max(0, p.front - p.baseline) * 100, 1)} cm above the pencil line` : ''; },
+        check: ev => { if (ev.type !== 'paperOut') return; return ev.dist >= 5 && !ev.washed ? { pass: true, note: 'Now use the distances on the paper’s card (click the paper).' } : { fail: 'The solvent has not moved far enough yet – hang the paper back in and wait longer.' }; },
+      },
+      {
+        type: 'input', unit: '', text: 'Ink B (green) has a yellow spot. Calculate its Rf value.',
+        hint: 'Rf = distance moved by the spot ÷ distance moved by the solvent front. Both distances are on the paper’s card – click the paper.',
+        verify: v => { const r = S.results.chroma, s = r?.spots.find(x => x.ink === 'B' && x.dye === 'yellow'); const rf = s ? s.d / r.front : 0.55; return Math.abs(v - rf) <= 0.03 ? true : { fail: 'Divide the yellow spot’s distance by the solvent front’s distance. The answer is less than 1 and has no units.' }; },
+        onPass: v => { S.results.chromaRf = v; },
+      },
+      {
+        type: 'choice', text: 'Which dyes does the unknown ink D contain?', options: ['Yellow and red', 'Blue and red', 'Blue and yellow', 'Blue, yellow and red'],
+        answer: () => ['yr', 'br', 'by'].findIndex(c => INK_CODES[c].join() === find('paper').inks.D.dyes.join()),
+        explain: 'Spots at the same height (the same Rf) in the same solvent are the same dye. Compare D’s spots with inks A, B and C.',
+        onPass: () => { S.results.chromaAnswer = true; },
+      },
+    ],
+    quiz: [
+      { q: 'Why is the start line drawn in pencil, not pen?', options: ['Pencil does not dissolve in the solvent, so it will not run up the paper', 'Pencil is easier to see', 'Pen would make the paper wet', 'Pencil makes the solvent move faster'], answer: 0, explain: 'Pen ink would dissolve and separate too, which would confuse the results.' },
+      { q: 'How is an Rf value calculated?', options: ['Distance moved by the spot ÷ distance moved by the solvent', 'Distance moved by the solvent ÷ distance moved by the spot', 'Distance moved by the spot × time', 'Height of the paper ÷ distance moved by the spot'], answer: 0, explain: 'Rf is always between 0 and 1. In the same solvent, the same substance always has the same Rf.' },
+      { q: 'A pure substance on a chromatogram gives…', options: ['One spot', 'Two spots', 'Three or more spots', 'No spots'], answer: 0, explain: 'A mixture separates into several spots; a pure substance gives a single spot.' },
+    ],
+  },
 ];
 
 /* =====================================================================
@@ -3109,7 +3748,20 @@ function renderCard() {
   let a = '';
   switch (it.kind) {
     case 'beaker': case 'flask': case 'testtube': case 'cylinder':
-      a += btn('pour', 'Pour into…', 'primary') + btn('sink', 'Empty in sink');
+      if (it.rigSyringe) a += btn('bung', it.bunged ? 'Take bung out' : 'Put bung in', it.bunged ? '' : 'primary');
+      a += btn('pour', 'Pour into…', it.rigSyringe ? '' : 'primary') + btn('sink', 'Empty in sink');
+      break;
+    case 'soliddish': a += btn('addPiece', 'Add a piece to…', 'primary'); break;
+    case 'syringe': a = `<div style="font-size:13px;margin-bottom:8px">Gas collected: <b data-live="syr"></b></div>` + btn('syrReset', 'Reset to 0 cm³'); break;
+    case 'splint': a += btn('splint', 'Light & test gas…', 'primary'); break;
+    case 'powerpack':
+      a = `<div style="font-size:13px;margin-bottom:8px">Status: <b>${it.on ? 'ON' : 'off'}</b> · current <b data-live="amps"></b></div>`;
+      a += btn('power', it.on ? 'Switch off' : 'Switch on', it.on ? '' : 'primary');
+      a += `<div class="seg" style="margin:6px 0 0">${[2, 4, 6, 8, 10, 12].map(v => `<button data-act="volts" data-arg="${v}" class="${it.volts === v ? 'active' : ''}">${v} V</button>`).join('')}</div>`;
+      break;
+    case 'paper':
+      a = `<div style="font-size:13px;margin-bottom:8px;width:100%" data-live="paper"></div>`;
+      a += it.hung ? btn('paperOut', 'Take it out', 'primary') : (it.done || it.washed) ? btn('paperNew', 'Use a new paper', 'primary') : btn('paperHang', 'Hang in the beaker', 'primary');
       break;
     case 'boilingtube':
       a += btn('delivery', it.deliveryIn ? 'Lift delivery tube out' : 'Put delivery tube back', 'primary');
@@ -3165,6 +3817,9 @@ function liveUpdate() {
     set('haz', hz.map(z => `<span class="chip haz">⚠ ${esc(z)}</span>`).join(''));
     if (it.kind === 'boilingtube') set('decomp', `${Math.round((it.decompProgress || 0) * 100)}%`);
   }
+  if (it.kind === 'syringe') set('syr', `${fmt(it.vol, 1)} cm³`);
+  if (it.kind === 'powerpack') set('amps', `${fmt(it.amps, 2)} A`);
+  if (it.kind === 'paper') set('paper', paperStatusHTML(it));
 }
 cardEl.addEventListener('click', e => {
   const b = e.target.closest('[data-act]'); if (!b || b.disabled) return;
@@ -3190,6 +3845,15 @@ cardEl.addEventListener('click', e => {
     delivery: () => toggleDelivery(it),
     chart: () => openChart(),
     focus: () => focusOn(it.group),
+    bung: () => toggleBung(it),
+    addPiece: () => startMode('addSolid', it, `Click the flask or beaker to add a piece of ${SUBSTANCES[it.substance].name.toLowerCase()} to.`),
+    syrReset: () => resetSyringe(it),
+    splint: () => startMode('splint', it, 'Click the gas syringe (or a fizzing flask) to test the gas with the lighted splint.'),
+    power: () => togglePower(it),
+    volts: () => setVolts(it, +arg),
+    paperHang: () => hangPaper(it),
+    paperOut: () => takeOutPaper(it),
+    paperNew: () => newPaper(it),
   };
   acts[b.dataset.act]?.();
 });
@@ -3213,10 +3877,9 @@ function notebookLog(text, kind = 'action') {
   nbDirty = true;
 }
 function recordResult(type, key, data) { if (!S.results[type]) S.results[type] = {}; S.results[type][key] = data; nbDirty = true; }
-function renderNotebook() {
-  nbDirty = false;
-  const el = $('#panelNotebook'); if (el.hidden) return;
-  const r = S.results; let h = `<h4 class="sec" style="margin-top:0">${esc(Runner.exp?.title || '')}</h4>`;
+/** Results tables for the current experiment (used by the notebook and the printed report). */
+function resultsHTML() {
+  const r = S.results; let h = '';
   const runs = titrationRuns();
   if (runs.length) {
     const cc = concordantSet();
@@ -3225,12 +3888,23 @@ function renderNotebook() {
     const calc = r.calc;
     if (calc) h += `<p style="font-size:13px">Moles NaOH = 0.100 × ${fmt(calc.mean, 2)} ÷ 1000 = ${(0.1 * calc.mean / 1000).toExponential(3)} mol<br>Concentration HCl = moles ÷ 0.0250 dm³ = <b>${fmt(calc.conc, 4)} mol/dm³</b></p>`;
   }
-  if (r.flame) h += `<table class="results"><tr><th>Sample</th><th>Metal ion</th><th>Flame colour</th></tr>${Object.values(r.flame).map(f => `<tr><td>${esc(f.sample)}</td><td>${esc(f.ion)}</td><td><span class="swatch" style="display:inline-block;vertical-align:-2px;background:${f.hex}"></span> ${esc(f.colour)}</td></tr>`).join('')}</table>`;
+  if (r.flame) h += `<table class="results"><tr><th>Sample</th><th>Metal ion</th><th>Flame colour</th></tr>${Object.values(r.flame).map(f => `<tr><td>${esc(f.sample)}</td><td>${esc(f.unknown && !f.revealed ? '?' : f.ion)}</td><td><span class="swatch" style="display:inline-block;vertical-align:-2px;background:${f.hex}"></span> ${esc(f.colour)}</td></tr>`).join('')}</table>`;
   if (r.precip) h += `<table class="results"><tr><th>Tube</th><th>Mixed</th><th>Observation</th></tr>${Object.values(r.precip).map(p => `<tr><td>${esc(p.tube)}</td><td>${esc(p.mix)}</td><td>${esc(p.result)}</td></tr>`).join('')}</table>`;
   if (Runner.exp?.id === 'indicator') {
     const tubes = findAll('testtube').filter(t => t.container.m.ind.ui);
     if (tubes.length) h += `<table class="results"><tr><th>Tube</th><th>Colour</th><th>pH</th></tr>${tubes.map(t => { const p = Chem.pH(t.container.m); return `<tr><td>${esc(t.name.replace('Test tube ', ''))}</td><td><span class="swatch" style="display:inline-block;vertical-align:-2px;background:#${uiColor(p).getHexString(THREE.SRGBColorSpace)}"></span></td><td>${fmt(p, 1)}</td></tr>`; }).join('')}</table>`;
   }
+  if (r.rates) h += `<table class="results"><tr><th>Run</th><th>Acid</th><th>Gas collected</th><th>Time to stop</th></tr>${Object.values(r.rates).map(x => `<tr><td>${x.n}</td><td>${fmt(x.conc, 2)} M</td><td>${fmt(x.total, 0)} cm³</td><td>${Math.round(x.time)} s</td></tr>`).join('')}</table>`;
+  if (r.gastest) h += `<p style="font-size:13px">Gas test: ${esc(r.gastest.h2.result)}.</p>`;
+  if (r.electrolysis) h += `<table class="results"><tr><th>Electrode</th><th>Product</th></tr>${['cathode', 'anode'].filter(k => r.electrolysis[k]).map(k => `<tr><td>${k === 'cathode' ? 'Cathode (−)' : 'Anode (+)'}</td><td>${esc(r.electrolysis[k].product)}</td></tr>`).join('')}</table>`;
+  if (r.chroma) h += `<table class="results"><tr><th>Ink</th><th>Spots (distance from the pencil line)</th></tr>${Object.entries(r.chroma.inks).map(([k, sp]) => `<tr><td>${k} – ${esc(INKS[k].name)}</td><td>${sp.map(x => `${x.dye} ${fmt(x.d, 1)} cm`).join(', ')}</td></tr>`).join('')}</table><p style="font-size:13px">Solvent front: <b>${fmt(r.chroma.front, 1)} cm</b> from the pencil line. Rf = distance moved by the spot ÷ distance moved by the solvent.</p>`;
+  return h;
+}
+function renderNotebook() {
+  nbDirty = false;
+  const el = $('#panelNotebook'); if (el.hidden) return;
+  let h = `<h4 class="sec" style="margin-top:0">${esc(Runner.exp?.title || '')}</h4>`;
+  h += resultsHTML();
   h += `<h4 class="sec">Observations & actions</h4>`;
   h += S.notebook.length ? S.notebook.map(n => `<div class="notebook-entry ${n.kind}"><time>${Math.floor(n.t / 60)}:${String(Math.floor(n.t % 60)).padStart(2, '0')}</time><div>${n.kind === 'obs' ? '👁 ' : n.kind === 'warn' ? '⚠ ' : n.kind === 'result' ? '📊 ' : ''}${esc(n.text)}</div></div>`).join('') : '<p style="color:var(--muted)">Nothing recorded yet. Your actions and observations appear here automatically.</p>';
   h += `<div style="margin-top:12px"><button class="btn small" id="copyNotes">Copy notes</button></div>`;
@@ -3243,12 +3917,14 @@ function renderNotebook() {
 
 /* ---------- Experiment runner: steps, checks, progress ---------- */
 const Runner = {
-  exp: null, i: 0, feedback: null, completed: false, showHint: false,
+  fails: 0, exp: null, i: 0, feedback: null, completed: false, showHint: false,
   start(exp) {
     clearBench();
     this.exp = exp; this.i = 0; this.feedback = null; this.completed = false; this.showHint = false;
     S.notebook = []; S.results = {}; S.logged.clear(); S.explained.clear(); S.warned.clear(); S.t0 = performance.now(); S.titre = null;
     History.clear();
+    this.fails = 0; S.rates = { runs: [], current: null };
+    if (!TEST_MODE) TIME_SCALE = 1;
     exp.setup();
     rebuildPickables();
     setGoggles(false);
@@ -3268,7 +3944,7 @@ const Runner = {
   apply(r) {
     if (!r) return;
     if (r === true || r.pass) this.pass(r.note);
-    else if (r.fail) { this.feedback = { text: r.fail, good: false }; renderSteps(); }
+    else if (r.fail) { this.fails++; this.feedback = { text: r.fail, good: false }; renderSteps(); }
   },
   pass(note, value) {
     const st = this.step;
@@ -3296,6 +3972,7 @@ function renderSteps() {
       <li>Add silver nitrate to sodium chloride or potassium iodide.</li>
       <li>Pour hydrochloric acid into sodium hydrogencarbonate solution and watch it fizz.</li>
       <li>Drag a test tube out of the rack to move it to an empty slot.</li>
+      <li>Drop magnesium ribbon into hydrochloric acid, then test the gas with a lighted splint.</li>
       <li>Heat water on the hot plate until it boils.</li>
       <li>Try limewater + sodium hydrogencarbonate. What do you see?</li></ul>
       <p style="color:var(--muted);font-size:12.5px">Every reaction is checked by the chemistry engine and recorded in your notebook.</p>`;
@@ -3322,7 +3999,10 @@ function renderSteps() {
     h += `</ol>`;
     if (Runner.completed) h += `<div class="readout" style="padding:14px;margin-top:10px"><b>🎉 Experiment complete!</b><span>Check your notebook, then test yourself with the quiz.</span><div style="margin-top:8px"><button class="btn primary small" data-step="quiz">Take the quiz</button></div></div>`;
   }
-  if (exp.readouts) h += `<h4 class="sec">Live readings</h4><div class="readouts"><div class="readout"><b id="roReading">–</b><span>Burette reading (cm³)</span></div><div class="readout"><b id="roPH">–</b><span>pH in flask</span></div><div class="readout"><b id="roAdded">–</b><span>NaOH added this run (cm³)</span></div></div>
+  if (exp.speedUp) h += `<div style="margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><button class="btn small" data-step="speed">⏩ Time speed: ×${TIME_SCALE}</button><span style="font-size:12px;color:var(--muted)">Speeds up the waiting – the chemistry stays the same.</span></div>`;
+  if (exp.readouts === 'rates') h += `<h4 class="sec">Live readings</h4><div class="readouts"><div class="readout"><b id="roTime">–</b><span>Time this run (s)</span></div><div class="readout"><b id="roGas">–</b><span>Gas in syringe (cm³)</span></div><div class="readout"><b id="roTemp">–</b><span>Flask temperature (°C)</span></div></div>
+    <div class="graph-wrap"><canvas id="graph"></canvas></div><p style="font-size:12px;color:var(--muted);margin:4px 0 0">Volume of gas against time for each run. A steeper line means a faster reaction.</p>`;
+  if (exp.readouts === 'titration') h += `<h4 class="sec">Live readings</h4><div class="readouts"><div class="readout"><b id="roReading">–</b><span>Burette reading (cm³)</span></div><div class="readout"><b id="roPH">–</b><span>pH in flask</span></div><div class="readout"><b id="roAdded">–</b><span>NaOH added this run (cm³)</span></div></div>
     <div class="graph-wrap"><canvas id="graph"></canvas></div><p style="font-size:12px;color:var(--muted);margin:4px 0 0">Titration curve: pH of the flask against volume of NaOH added. The pink band is where phenolphthalein changes colour.</p>`;
   el.innerHTML = h;
   S.titr.dirty = true;
@@ -3334,34 +4014,44 @@ $('#panelSteps').addEventListener('click', e => {
   if (kind === 'hint') { Runner.showHint = !Runner.showHint; renderSteps(); }
   if (kind === 'next') Runner.pass();
   if (kind === 'quiz') openQuiz();
+  if (kind === 'speed') { TIME_SCALE = TIME_SCALE === 1 ? 4 : 1; renderSteps(); }
   if (kind === 'act' && b.dataset.act === 'chart') openChart();
   if (kind === 'check') {
     const v = parseFloat($('#stepInput').value);
     if (isNaN(v)) { Runner.feedback = { text: 'Type a number first.', good: false }; return renderSteps(); }
     const r = st.verify(v);
-    if (r === true) Runner.pass(null, v); else { Runner.feedback = { text: r.fail, good: false }; renderSteps(); }
+    if (r === true) Runner.pass(null, v); else { Runner.fails++; Runner.feedback = { text: r.fail, good: false }; renderSteps(); }
   }
   if (kind === 'choice') {
     const k = +b.dataset.k;
-    if (k === st.answer) { notebookLog(`Answered: ${st.options[k]}`, 'result'); Runner.pass(st.explain); }
-    else { b.classList.add('wrong'); Runner.feedback = { text: 'Not quite – try again.', good: false }; setTimeout(renderSteps, 700); }
+    const ans = typeof st.answer === 'function' ? st.answer() : st.answer;
+    if (k === ans) { notebookLog(`Answered: ${st.options[k]}`, 'result'); Runner.pass(st.explain); }
+    else { b.classList.add('wrong'); Runner.fails++; Runner.feedback = { text: 'Not quite – try again.', good: false }; setTimeout(renderSteps, 700); }
   }
 });
 function renderFoot() {
   const f = $('#panelFoot'); const exp = Runner.exp;
-  f.innerHTML = `<button class="btn small" id="btnRestart">↺ Restart</button>${exp.steps.length ? '<button class="btn small" id="btnIntro">Intro card</button>' : ''}${exp.quiz ? `<button class="btn small ${Runner.completed ? 'primary' : ''}" id="btnQuiz">Quiz</button>` : ''}`;
+  f.innerHTML = `<button class="btn small" id="btnRestart">↺ Restart</button>${exp.steps.length ? '<button class="btn small" id="btnIntro">Intro card</button>' : ''}${exp.quiz ? `<button class="btn small ${Runner.completed ? 'primary' : ''}" id="btnQuiz">Quiz</button>` : ''}${exp.steps.length ? '<button class="btn small" id="btnReport">Report</button>' : ''}`;
+  $('#btnReport') && ($('#btnReport').onclick = () => openReport());
   $('#btnRestart').onclick = () => { Runner.start(exp); showIntro(exp); };
   $('#btnIntro') && ($('#btnIntro').onclick = () => showIntro(exp));
   $('#btnQuiz') && ($('#btnQuiz').onclick = () => openQuiz());
 }
 function updateReadouts() {
-  if (!Runner.exp?.readouts) return;
-  const b = find('burette'), fl = S.underBurette || find('flask');
+  const ro = Runner.exp?.readouts; if (!ro) return;
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  set('roReading', b && b.container.vol > 0 ? fmt(50 - b.container.vol, 2) : '–');
-  const p = fl && Chem.pH(fl.container.m);
-  set('roPH', p != null ? fmt(p, 2) : '–');
-  set('roAdded', b ? fmt(b.dispensed - (b.runStart || 0), 2) : '–');
+  if (ro === 'titration') {
+    const b = find('burette'), fl = S.underBurette || find('flask');
+    set('roReading', b && b.container.vol > 0 ? fmt(50 - b.container.vol, 2) : '–');
+    const p = fl && Chem.pH(fl.container.m);
+    set('roPH', p != null ? fmt(p, 2) : '–');
+    set('roAdded', b ? fmt(b.dispensed - (b.runStart || 0), 2) : '–');
+  } else if (ro === 'rates') {
+    const fl = equipment.find(e => e.rigSyringe), run = S.rates.current;
+    set('roTime', run ? fmt(run.done ? run.tEnd : S.simTime - run.t0, 0) : '0');
+    set('roGas', fl ? fmt(fl.rigSyringe.vol, 1) : '–');
+    set('roTemp', fl ? fmt(fl.container.m.temp, 1) : '–');
+  }
   const prog = document.querySelector('.step.current .prog'); if (prog && Runner.step?.progress) prog.textContent = Runner.step.progress();
 }
 function updateProgressLine() {
@@ -3370,6 +4060,7 @@ function updateProgressLine() {
 
 /* ---------- Titration curve graph ---------- */
 function drawGraph() {
+  if (Runner.exp?.readouts === 'rates') return drawRateGraph();
   S.titr.dirty = false;
   const cv = $('#graph'); if (!cv) return;
   const W = cv.clientWidth, H = cv.clientHeight, dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -3398,6 +4089,38 @@ function drawGraph() {
   if (S.titr.end) { g.strokeStyle = '#e0287f'; g.setLineDash([4, 3]); g.beginPath(); g.moveTo(X(S.titr.end.v), T); g.lineTo(X(S.titr.end.v), T + hh); g.stroke(); g.setLineDash([]); g.fillStyle = '#e0287f'; g.textAlign = 'left'; g.fillText('end point', X(S.titr.end.v) + 4, T + 4); }
 }
 
+/** Gas volume against time, one coloured line per run. */
+function drawRateGraph() {
+  S.titr.dirty = false;
+  const cv = $('#graph'); if (!cv) return;
+  const W = cv.clientWidth, H = cv.clientHeight, dpr = Math.min(2, window.devicePixelRatio || 1);
+  if (!W) return;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const g = cv.getContext('2d'); g.scale(dpr, dpr);
+  const css = getComputedStyle(document.documentElement);
+  const text = css.getPropertyValue('--muted').trim(), grid = css.getPropertyValue('--border').trim();
+  const colours = [css.getPropertyValue('--accent').trim(), '#e0287f', '#16a34a', '#d97706', '#7c3aed'];
+  const runs = S.rates.runs, lastT = runs.length ? Math.max(...runs.map(r => r.points[r.points.length - 1].t)) : 0;
+  const topV = runs.length ? Math.max(...runs.map(r => Math.max(...r.points.map(p => p.v)))) : 0;
+  const maxT = Math.max(60, Math.ceil(lastT / 20) * 20), maxV = topV > 60 ? 100 : 60;
+  const L = 30, R = 8, T = 8, B = 24, w = W - L - R, hh = H - T - B;
+  const X = t => L + (t / maxT) * w, Y = v => T + (1 - v / maxV) * hh;
+  g.strokeStyle = grid; g.lineWidth = 1; g.fillStyle = text; g.font = '10px system-ui'; g.textAlign = 'right'; g.textBaseline = 'middle';
+  for (let v = 0; v <= maxV; v += maxV > 60 ? 20 : 10) { g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(L + w, Y(v)); g.stroke(); g.fillText(v, L - 5, Y(v)); }
+  g.textAlign = 'center'; g.textBaseline = 'top';
+  for (let t = 0; t <= maxT; t += maxT > 100 ? 20 : 10) g.fillText(t, X(t), T + hh + 5);
+  g.save(); g.translate(9, T + hh / 2); g.rotate(-Math.PI / 2); g.textBaseline = 'middle'; g.fillText('gas volume / cm³', 0, 0); g.restore();
+  g.textAlign = 'right'; g.fillText('time / s', L + w, T + hh - 14);
+  runs.forEach((r, i) => {
+    const c = colours[i % colours.length];
+    g.strokeStyle = c; g.lineWidth = 2.2; g.beginPath();
+    r.points.forEach((p, k) => k ? g.lineTo(X(p.t), Y(p.v)) : g.moveTo(X(p.t), Y(p.v)));
+    g.stroke();
+    g.fillStyle = c; g.textAlign = 'left'; g.textBaseline = 'top'; g.font = 'bold 10px system-ui';
+    g.fillText(`Run ${r.n}: ${fmt(r.conc, 2)} M`, L + 8, T + 4 + i * 13);
+  });
+}
+
 /* ---------- Intro card, quiz, help ---------- */
 function showIntro(exp) {
   if (!exp.steps.length) {
@@ -3405,7 +4128,7 @@ function showIntro(exp) {
     return;
   }
   openModal({
-    icon: ['🔬', '⚗️', '🔥', '🧪', '🌈', '♨️'][exp.num], title: `Experiment ${exp.num}: ${exp.title}`, sub: exp.sub, wide: true,
+    icon: ['🔬', '⚗️', '🔥', '🧪', '🌈', '♨️', '⏱️', '🔋', '🖍️'][exp.num], title: `Experiment ${exp.num}: ${exp.title}`, sub: exp.sub, wide: true,
     body: `<div class="intro-grid">
       <section><h5>Aim</h5>${esc(exp.aim)}</section>
       <section><h5>Equipment</h5><div class="chips">${exp.equipment.map(e => `<span class="chip">${esc(e)}</span>`).join('')}</div></section>
@@ -3443,7 +4166,7 @@ function openQuiz() {
   };
   const finish = () => {
     notebookLog(`Quiz score: ${score} / ${quiz.length}.`, 'result');
-    markProgress(Runner.exp.id, { bestQuiz: Math.max(score, PROGRESS[Runner.exp.id]?.bestQuiz ?? 0) });
+    markProgress(Runner.exp.id, { bestQuiz: Math.max(score, PROGRESS[Runner.exp.id]?.bestQuiz ?? 0), lastQuiz: score });
     const next = EXPERIMENTS.find(e => e.num === Runner.exp.num + 1);
     openModal({
       icon: score === quiz.length ? '🏆' : '📘', title: 'Quiz results', sub: Runner.exp.title,
@@ -3463,6 +4186,7 @@ function showHelp() {
       <section><h5>Units</h5>Volumes are in cm³ (1 cm³ = 1 mL). Concentrations are in mol/dm³ (M).</section>
       <section><h5>Saving</h5>Your bench, steps, notebook, completed experiments and quiz scores are saved automatically in this browser. Add <kbd>?test</kbd> to the address to run the built-in self-test.</section></div>`,
     actions: [
+      { label: 'Teacher tools', fn: () => openTeacherTools() },
       { label: 'Replay the tour', fn: () => Tour.start() },
       { label: 'Clear saved progress', fn: () => openModal({ icon: '🗑️', warn: true, title: 'Clear saved progress?', body: '<p>This removes your completed experiments, quiz scores and saved session from this browser. It cannot be undone.</p>', actions: [{ label: 'Cancel' }, { label: 'Clear', primary: true, fn: clearSavedProgress }] }) },
       { label: 'OK', primary: true },
@@ -3517,6 +4241,8 @@ function snapshotSession() {
     elapsed: (performance.now() - S.t0) / 1000,
     logged: [...S.logged], explained: [...S.explained],
     underBurette: idx(S.underBurette),
+    fails: Runner.fails || 0, studentName: S.studentName || '', flameUnknown: SUBSTANCES.unknownX?.flameIon || null,
+    rates: { runs: S.rates.runs },
     items: equipment.map(e => {
       const o = {};
       if (e.parentEquip) { o.rack = idx(e.parentEquip); o.slot = e.slot; } else o.pos = e.group.position.toArray();
@@ -3528,6 +4254,11 @@ function snapshotSession() {
       if (e.kind === 'boilingtube') Object.assign(o, { deliveryIn: e.deliveryIn, decompProgress: e.decompProgress || 0, bunsen: idx(e.bunsen) });
       if (e.kind === 'hotplate') o.level = e.level;
       if (e.kind === 'bunsen') o.air = e.air;
+      if (e.kind === 'syringe') Object.assign(o, { vol: e.vol, gas: e.gas });
+      if (e.rigSyringe) o.bunged = e.bunged;
+      if (e.cell) o.deposit = e.deposit;
+      if (e.kind === 'powerpack') o.volts = e.volts;
+      if (e.kind === 'paper') Object.assign(o, { hung: e.hung, front: e.front, washed: e.washed, done: e.done, dyesD: e.inks.D.dyes });
       return o;
     }),
   };
@@ -3551,7 +4282,13 @@ function restoreSession(snap) {
     if (e.kind === 'hotplate') setHotLevel(e, o.level);
     if (e.kind === 'bunsen') { e.air = o.air; updateCollar(e); }
     if (e.kind === 'boilingtube') { e.deliveryIn = o.deliveryIn; e.decompProgress = o.decompProgress; }
+    if (e.kind === 'syringe') Object.assign(e, { vol: o.vol, shownVol: o.vol, gas: o.gas });
+    if (e.rigSyringe && o.bunged) { e.bunged = true; e.bungMesh.visible = e.rateTube.visible = true; }
+    if (e.cell) { e.deposit = o.deposit || 0; e.sleeve.visible = e.deposit > 1e-6; e.sleeve.material.opacity = clamp(e.deposit / 1.2e-4, 0, 1); }
+    if (e.kind === 'powerpack') { e.volts = o.volts; e.redrawDisplay(); }
+    if (e.kind === 'paper') { Object.assign(e, { hung: o.hung, front: o.front, washed: o.washed, done: o.done }); e.inks.D.dyes = o.dyesD; placePaper(e, o.hung); e.redraw(); }
   });
+  if (snap.flameUnknown && SUBSTANCES.unknownX) SUBSTANCES.unknownX.flameIon = snap.flameUnknown;
   // test tubes back into their saved rack slots
   for (const rk of findAll('rack')) rk.tubes = [];
   equipment.forEach((e, k) => { const o = snap.items[k]; if (o.rack >= 0 && o.rack !== undefined) rackAddTube(equipment[o.rack], e, o.slot); });
@@ -3568,6 +4305,8 @@ function restoreSession(snap) {
   S.titr = { ...snap.titr, dirty: true };
   S.t0 = performance.now() - snap.elapsed * 1000;
   S.logged = new Set(snap.logged); S.explained = new Set(snap.explained);
+  Runner.fails = snap.fails || 0; S.studentName = snap.studentName || '';
+  S.rates = { runs: (snap.rates?.runs || []).map(r => ({ ...r, done: true })), current: null };
   notebookLog('Continued from your saved session.', 'action');
   $('#nbCount').textContent = S.notebook.filter(n => n.kind !== 'action').length;
   rebuildPickables(); renderSteps(); renderFoot(); nbDirty = true;
@@ -3660,6 +4399,115 @@ const Tour = {
 bus.on(ev => Tour.onEvent(ev));
 window.addEventListener('resize', () => Tour.show());
 
+/* ---------- Teacher mode: class settings, share link, reports ---------- */
+const TEACHER_KEY = 'chemlab-teacher-v1';
+let TEACHER = { hcl: null, flame: 'random', ink: 'random', fromLink: false };
+/** Settings come from this browser, then from the link (a teacher's shared link wins). */
+function loadTeacherSettings() {
+  const saved = store.get(TEACHER_KEY) || {};
+  TEACHER = { hcl: saved.hcl ?? null, flame: saved.flame || 'random', ink: saved.ink || 'random', fromLink: false };
+  const q = new URLSearchParams(location.search);
+  if (q.has('hcl')) { const v = parseFloat(q.get('hcl')); if (v >= 0.05 && v <= 0.2) { TEACHER.hcl = v; TEACHER.fromLink = true; } }
+  if (FLAME_CODES[q.get('flame')]) { TEACHER.flame = q.get('flame'); TEACHER.fromLink = true; }
+  if (INK_CODES[q.get('ink')]) { TEACHER.ink = q.get('ink'); TEACHER.fromLink = true; }
+}
+function teacherLink(t) {
+  const q = new URLSearchParams();
+  if (t.hcl != null) q.set('hcl', fmt(t.hcl, 4));
+  if (t.flame !== 'random') q.set('flame', t.flame);
+  if (t.ink !== 'random') q.set('ink', t.ink);
+  const base = location.href.split('#')[0].split('?')[0];
+  return q.toString() ? `${base}?${q}` : base;
+}
+function openTeacherTools() {
+  const t = TEACHER;
+  openModal({
+    icon: '🧑‍🏫', title: 'Teacher tools', sub: 'Set up practicals for your class and collect results', wide: true,
+    body: `<div class="intro-grid">
+      <section><h5>Class settings</h5>
+        <label class="t-row">Titration acid concentration
+          <select id="tHclMode"><option value="random">Random (0.085–0.115 M)</option><option value="fixed">Fixed value</option></select>
+          <input type="number" id="tHcl" step="0.0005" min="0.05" max="0.2" value="${t.hcl ?? 0.1}"> mol/dm³</label>
+        <label class="t-row">Flame tests – unknown sample X
+          <select id="tFlame"><option value="random">Random</option>${Object.entries(FLAME_CODES).map(([c, i]) => `<option value="${c}">${FLAME[i].metal} (${i})</option>`).join('')}</select></label>
+        <label class="t-row">Chromatography – unknown ink D
+          <select id="tInk"><option value="random">Random</option><option value="yr">yellow + red</option><option value="br">blue + red</option><option value="by">blue + yellow</option></select></label>
+        <p class="t-note">Settings apply the next time an experiment is started.</p></section>
+      <section><h5>Share with your class</h5>
+        <p class="t-note">Students who open this link get your settings. They need no account.</p>
+        <div class="t-link"><input id="tLink" readonly aria-label="Class link"><button class="btn small" id="tCopy">Copy link</button></div>
+        <p class="t-note">Anyone who opens Teacher tools can see these settings, so use them for practice rather than formal assessment.</p></section>
+      <section><h5>Reports</h5>
+        <p class="t-note">Make a marked report of the current experiment: steps completed, answers that needed another try, safety warnings, quiz score, results and the full notebook.</p>
+        <button class="btn small primary" id="tReport">Create report…</button></section>
+    </div>`,
+    actions: [{ label: 'Close' }, { label: 'Save settings', primary: true, fn: saveTeacherForm }],
+    onOpen: m => {
+      m.querySelector('#tHclMode').value = t.hcl == null ? 'random' : 'fixed';
+      m.querySelector('#tFlame').value = t.flame; m.querySelector('#tInk').value = t.ink;
+      const sync = () => { m.querySelector('#tHcl').disabled = m.querySelector('#tHclMode').value === 'random'; m.querySelector('#tLink').value = teacherLink(readTeacherForm()); };
+      m.querySelectorAll('select, input[type=number]').forEach(el => el.oninput = sync);
+      sync();
+      m.querySelector('#tCopy').onclick = () => navigator.clipboard?.writeText(m.querySelector('#tLink').value).then(() => toast({ title: 'Link copied', text: 'Paste it into your class page or message.', kind: 'ok', time: 2500 }), () => {});
+      m.querySelector('#tReport').onclick = () => { closeModal(); openReport(); };
+    },
+  });
+}
+function readTeacherForm() {
+  return {
+    hcl: $('#tHclMode').value === 'fixed' ? clamp(parseFloat($('#tHcl').value) || 0.1, 0.05, 0.2) : null,
+    flame: $('#tFlame').value, ink: $('#tInk').value,
+  };
+}
+function saveTeacherForm() {
+  const f = readTeacherForm();
+  Object.assign(TEACHER, f);
+  store.set(TEACHER_KEY, f);
+  toast({ title: 'Teacher settings saved', text: 'They apply the next time an experiment is started.', kind: 'ok', time: 3500 });
+}
+function openReport() {
+  openModal({
+    icon: '📄', title: 'Lab report', sub: Runner.exp.title,
+    body: `<label class="t-row">Student name <input id="rName" type="text" placeholder="Your name" value="${esc(S.studentName || '')}" style="flex:1;min-width:160px"></label>
+      <p class="t-note">The report includes the steps you completed, answers that needed another try, safety warnings, your quiz score, your results and the whole lab notebook.</p>`,
+    actions: [{ label: 'Cancel' }, { label: 'Download (.txt)', fn: () => { S.studentName = $('#rName').value.trim(); downloadReport(); } }, { label: 'Print / save as PDF', primary: true, fn: () => { S.studentName = $('#rName').value.trim(); printReport(); } }],
+  });
+}
+/** The report: a marking summary, the results tables, the notebook and overall progress. */
+function buildReport() {
+  const exp = Runner.exp, n = exp.steps.length, prog = PROGRESS[exp.id] || {};
+  const el = (performance.now() - S.t0) / 1000;
+  const rows = [
+    ['Student', S.studentName || '(no name given)'], ['Experiment', exp.title], ['Date', new Date().toLocaleString()],
+    ['Time spent', `${Math.floor(el / 60)} min ${Math.round(el % 60)} s`],
+    ...(n ? [['Steps completed', `${Runner.completed ? n : Runner.i} of ${n}${Runner.completed ? ' (complete)' : ''}`], ['Answers or actions that needed another try', String(Runner.fails || 0)]] : []),
+    ['Safety warnings', String(S.notebook.filter(x => x.kind === 'warn').length)],
+    ...(exp.quiz ? [['Quiz score', prog.lastQuiz != null ? `${prog.lastQuiz} / ${exp.quiz.length} (best ${prog.bestQuiz} / ${exp.quiz.length})` : 'not taken yet']] : []),
+    ...(exp.reportResult ? [['Result', exp.reportResult()]] : []),
+  ];
+  const nb = S.notebook.map(x => `[${Math.floor(x.t / 60)}:${String(Math.floor(x.t % 60)).padStart(2, '0')}] ${x.text}`);
+  const html = `<h1>ChemLab 3D – lab report</h1>
+    <table>${rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>
+    <h2>Results</h2>${resultsHTML() || '<p>No results recorded yet.</p>'}
+    <h2>Lab notebook</h2><ol>${nb.map(x => `<li>${esc(x)}</li>`).join('')}</ol>
+    <h2>All experiments</h2><table><tr><th>Experiment</th><th>Completed</th><th>Best quiz</th></tr>${EXPERIMENTS.filter(e => e.steps.length).map(e => `<tr><td>${esc(e.title)}</td><td>${PROGRESS[e.id]?.completed ? 'Yes' : '–'}</td><td>${PROGRESS[e.id]?.bestQuiz != null ? PROGRESS[e.id].bestQuiz + ' / 3' : '–'}</td></tr>`).join('')}</table>`;
+  const text = `ChemLab 3D – lab report\n\n${rows.map(([k, v]) => `${k}: ${v}`).join('\n')}\n\nLab notebook\n${nb.join('\n')}\n`;
+  return { html, text };
+}
+function printReport() {
+  $('#report').innerHTML = buildReport().html;
+  notebookLog('Printed / saved a lab report.', 'action');
+  setTimeout(() => window.print(), 100);
+}
+function downloadReport() {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([buildReport().text], { type: 'text/plain' }));
+  a.download = `ChemLab-report-${Runner.exp.id}-${(S.studentName || 'student').replace(/[^\w-]+/g, '_')}.txt`;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  notebookLog('Downloaded a lab report.', 'action');
+}
+
 /* ---------- Theme ---------- */
 const THEMES = ['auto', 'light', 'dark'];
 let themeIdx = 0;
@@ -3731,10 +4579,14 @@ function loop() {
   adaptQuality(raw);
   const dt = Math.min(raw, 0.05) * TIME_SCALE, time = clock.elapsedTime;
   updateTweens(dt);
+  S.simTime += dt; updateRates(dt);
   for (let i = 0; i < equipment.length; i++) {
     const e = equipment[i];
     if (e.kind === 'burette') updateBurette(e, dt);
     else if (e.kind === 'bunsen') updateFlame(e, dt, time);
+    else if (e.kind === 'syringe') updateSyringe(e, dt);
+    else if (e.kind === 'powerpack') updateElectrolysis(e, dt);
+    else if (e.kind === 'paper') updateChroma(e, dt);
     else if (e.kind === 'hotplate') {
       e.plateT += ((e.on ? { low: 120, med: 220, high: 330 }[e.level] : 20) - e.plateT) * 0.6 * dt;
       e.plateMat.emissiveIntensity = smoothstep(70, 330, e.plateT) * 0.55;
@@ -3746,7 +4598,10 @@ function loop() {
   updateHover();
   updateSelRing(time);
   liveTimer -= dt;
-  if (liveTimer <= 0) { liveTimer = 0.2; liveUpdate(); updateReadouts(); updateProgressLine(); if (nbDirty) renderNotebook(); }
+  if (liveTimer <= 0) {
+    liveTimer = 0.2; liveUpdate(); updateReadouts(); updateProgressLine(); if (nbDirty) renderNotebook();
+    if (Runner.step?.poll) Runner.handle({ type: 'tick' });     // steps that watch a quantity grow, rather than wait for an event
+  }
   graphTimer -= dt;
   if (S.titr.dirty && graphTimer <= 0) { graphTimer = 0.1; drawGraph(); }
   controls.update(); clampTarget();
@@ -3856,6 +4711,15 @@ async function runSelfTests() {
   c = col(['hcl', 25], ['php', 0.15]); ok('Indicators', 'Phenolphthalein is colourless in acid', Math.abs(c.r - WATER_C.r) < 0.02 && Math.abs(c.g - WATER_C.g) < 0.02);
   c = col(['naoh', 25], ['php', 0.15]); ok('Indicators', 'Phenolphthalein is pink in alkali', c.r > c.g * 1.3);
 
+  const elec = parts => { const m = mix(...parts).m, V = m.vol / 1000; return { c: ELECTROLYSIS.cathode.find(r => r.when(m, V)).product, a: ELECTROLYSIS.anode.find(r => r.when(m, V)).product, I: Chem.current(m, 6) }; };
+  let el = elec([['cuso4', 50]]); ok('Electrolysis', 'CuSO₄(aq): copper at the cathode, oxygen at the anode', el.c === 'Cu' && el.a === 'O2');
+  el = elec([['hcl_clean', 50]]); ok('Electrolysis', '1 M HCl: hydrogen at the cathode, chlorine at the anode', el.c === 'H2' && el.a === 'Cl2');
+  el = elec([['nacl', 50]]); ok('Electrolysis', 'Dilute NaCl: hydrogen and oxygen', el.c === 'H2' && el.a === 'O2');
+  el = elec([['water', 50]]); ok('Electrolysis', 'Pure water hardly conducts', el.I < 0.001, `${el.I.toExponential(1)} A`);
+  const mgm = mix(['hcl_clean', 25]).m, ph0 = Chem.pH(mgm); mgm.addSolid('mg', 0.05 / 24.3); let h2 = 0;
+  for (let i = 0; i < 2000 && (mgm.solid.mg || 0) > 0; i++) for (const f of Chem.kinetics(mgm, 0.1)) h2 += f.gas;
+  ok('Reactions', 'Magnesium + acid: 0.05 g Mg gives 49 cm³ of hydrogen', near(h2 * 24000, 49.4, 0.3), `${fmt(h2 * 24000, 1)} cm³`);
+  ok('Reactions', 'Magnesium + acid uses up acid (pH rises) and warms the solution', Chem.pH(mgm) > ph0 + 0.05 && mgm.temp > 25);
   /* ---- 4. Scenarios: drive the real app like a student ---- */
   await scenario('Titration', async () => {
     await startExp('titration');
@@ -3893,9 +4757,11 @@ async function runSelfTests() {
     toggleBunsen(b); toggleAir(b);
     for (const g of findAll('watchglass')) { await dipWire(w, acid); await dipWire(w, g); await holdInFlame(w); }
     const res = S.results.flame || {};
-    ok('Scenarios', 'Flame tests: five correct colours recorded', Object.keys(FLAME).every(i => res[i] && res[i].colour === FLAME[i].name));
+    ok('Scenarios', 'Flame tests: five correct colours recorded', Object.keys(FLAME).every(i => Object.values(res).some(r => !r.unknown && r.ion === i && r.colour === FLAME[i].name)));
+    ok('Scenarios', 'Flame tests: unknown X tested, ion hidden until identified', Object.values(res).some(r => r.unknown) && Runner.step?.type === 'choice');
     await dipWire(w, findAll('watchglass')[0]); await dipWire(w, findAll('watchglass')[1]);
     ok('Scenarios', 'Flame tests: unclean wire is detected', w.contaminated === true);
+    await stepClick(`[data-step="choice"][data-k="${Object.keys(FLAME).indexOf(SUBSTANCES.unknownX.flameIon)}"]`); await realWait(500);
     toggleBunsen(b); await realWait(500);
     ok('Scenarios', 'Flame tests: all steps completed', Runner.completed);
   });
@@ -3967,6 +4833,73 @@ async function runSelfTests() {
     toggleHotplate(hp);
   });
 
+  await scenario('Rates of reaction', async () => {
+    await startExp('rates');
+    const fl = equipment.find(e => e.rigSyringe), syr = find('syringe'), cylE = find('cylinder'), dish = find('soliddish');
+    await doPour(reagent('hcl_clean'), cylE, 25); await doPour(cylE, fl, 25);
+    ok('Scenarios', 'Rates: 25 cm³ of acid measured into the flask', near(fl.container.vol, 25, 0.001) && Runner.i === 3);
+    await addSolidPiece(dish, fl); toggleBung(fl);
+    ok('Scenarios', 'Rates: magnesium added and bung in', Runner.i === 4);
+    await until(() => S.rates.runs[0]?.done, 90);
+    const r1 = S.rates.runs[0];
+    ok('Scenarios', 'Rates: about 49 cm³ of hydrogen collected', r1 && r1.total > 44 && r1.total <= 50, r1 ? `${fmt(r1.total, 1)} cm³` : 'no run');
+    toggleBung(fl); emptyToSink(fl); await until(() => !S.busy, 20); resetSyringe(syr);
+    await doPour(reagent('hcl_05'), cylE, 25); await doPour(cylE, fl, 25);
+    await addSolidPiece(dish, fl); toggleBung(fl);
+    await until(() => S.rates.runs[1]?.done, 200);
+    const r2 = S.rates.runs[1];
+    ok('Scenarios', 'Rates: half the concentration is clearly slower', r2 && r2.tEnd > r1.tEnd * 1.5, r2 ? `${Math.round(r1.tEnd)} s vs ${Math.round(r2.tEnd)} s` : 'no run');
+    ok('Scenarios', 'Rates: same total volume of gas both times', r2 && Math.abs(r2.total - r1.total) < 3);
+    await stepClick('[data-step="choice"][data-k="0"]'); await realWait(500);
+    await stepClick('[data-step="choice"][data-k="0"]'); await realWait(500);
+    await testWithSplint(find('splint'), syr);
+    ok('Scenarios', 'Rates: squeaky pop test; all steps completed', Runner.completed && !!S.results.gastest);
+  });
+  await scenario('Electrolysis', async () => {
+    await startExp('electrolysis');
+    const cell = find('beaker', b => b.cell), pack = find('powerpack');
+    await doPour(reagent('cuso4'), cell, 80);
+    setVolts(pack, 6); togglePower(pack); await simWait(0.3);
+    ok('Scenarios', 'Electrolysis: cell filled and power on', pack.on && Runner.i === 3 && pack.amps > 0.5, `${fmt(pack.amps, 2)} A`);
+    await until(() => cell.deposit >= 1.5e-4 && S.results.electrolysis?.anode, 90);
+    ok('Scenarios', 'Electrolysis: copper on the cathode, oxygen at the anode', S.results.electrolysis?.cathode?.product === 'copper' && S.results.electrolysis?.anode?.product === 'oxygen');
+    ok('Scenarios', 'Electrolysis: the solution becomes acidic', Chem.pH(cell.container.m) < 4, `pH ${fmt(Chem.pH(cell.container.m), 2)}`);
+    await realWait(500);
+    await stepClick('[data-step="choice"][data-k="0"]'); await realWait(500);
+    await stepClick('[data-step="choice"][data-k="0"]'); await realWait(500);
+    togglePower(pack); await realWait(500);
+    await stepClick('[data-step="next"]');
+    ok('Scenarios', 'Electrolysis: all steps completed', Runner.completed);
+  });
+  await scenario('Chromatography', async () => {
+    await startExp('chroma');
+    const bk = find('beaker'), p = find('paper');
+    await doPour(reagent('water'), bk, 70); hangPaper(p); await realWait(100);
+    ok('Scenarios', 'Chromatography: too much solvent washes the inks away', p.washed && Runner.i === 1 && Runner.feedback && !Runner.feedback.good, `washed ${p.washed}, step ${Runner.i}, feedback ${Runner.feedback?.good}`);
+    takeOutPaper(p); newPaper(p); emptyToSink(bk); await until(() => !S.busy, 20);
+    await doPour(reagent('water'), bk, 20); hangPaper(p);
+    ok('Scenarios', 'Chromatography: correct solvent level, paper hung', !p.washed && Runner.i === 3);
+    await until(() => p.front - p.baseline >= 0.075, 120);
+    takeOutPaper(p);
+    const r = S.results.chroma, y = r && r.spots.find(s => s.ink === 'B' && s.dye === 'yellow');
+    ok('Scenarios', 'Chromatography: the yellow dye has Rf ≈ 0.55', y && near(y.d / r.front, 0.55, 0.02), y ? fmt(y.d / r.front, 3) : 'no result');
+    await answer(fmt(y.d / r.front, 2));
+    await stepClick(`[data-step="choice"][data-k="${Runner.step.answer()}"]`);
+    ok('Scenarios', 'Chromatography: all steps completed', Runner.completed);
+  });
+  await scenario('Teacher mode', async () => {
+    const saved = { ...TEACHER };
+    Object.assign(TEACHER, { hcl: 0.095, flame: 'K', ink: 'br' });
+    await startExp('titration'); ok('Teacher', 'A fixed titration concentration is used', SUBSTANCES.hcl_unknown.conc === 0.095);
+    await startExp('flame'); ok('Teacher', 'The chosen unknown flame sample is used', SUBSTANCES.unknownX.flameIon === 'K+' && findAll('watchglass').length === 6);
+    await startExp('chroma'); ok('Teacher', 'The chosen unknown ink is used', find('paper').inks.D.dyes.join() === 'blue,red');
+    const link = teacherLink(TEACHER);
+    ok('Teacher', 'The share link carries the settings', /hcl=0\.0950/.test(link) && /flame=K/.test(link) && /ink=br/.test(link), link);
+    S.studentName = 'Test Student';
+    const rep = buildReport();
+    ok('Teacher', 'The report has the name, marking summary and notebook', rep.html.includes('Test Student') && rep.html.includes('Steps completed') && rep.text.includes('Lab notebook'));
+    Object.assign(TEACHER, saved); S.studentName = '';
+  });
   await scenario('Saving and tour', async () => {
     await startExp('precip');
     const tubes = findAll('testtube'), rack = find('rack');
@@ -4008,6 +4941,7 @@ function init() {
   };
   makeControls();
   PROGRESS = store.get(PROGRESS_KEY) || {};
+  loadTeacherSettings();
   setupUI();
   if (matchMedia('(pointer: coarse)').matches) $('#hint').textContent = 'One finger: orbit · Two fingers: zoom & pan · Tap an item to select it';
   setTimeout(() => $('#hint').classList.add('fade'), 12000);
@@ -4018,7 +4952,9 @@ function init() {
   if (TEST_MODE) { TIME_SCALE = 5; setTimeout(runSelfTests, 800); }
   else {
     const saved = store.get(SAVE_KEY);
-    if (!store.get(TOUR_KEY) && !saved) Tour.start(() => showWelcome(saved)); else showWelcome(saved);
+    if (new URLSearchParams(location.search).has('teacher')) { S.welcomed = true; openTeacherTools(); }
+    else if (!store.get(TOUR_KEY) && !saved) Tour.start(() => showWelcome(saved)); else showWelcome(saved);
+    if (TEACHER.fromLink) toast({ title: 'Your teacher\u2019s settings are on', text: 'This link sets the unknown samples and concentrations for your class.', kind: 'ok', time: 6000 });
   }
 }
 try { init(); }
