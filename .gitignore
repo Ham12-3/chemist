@@ -1,0 +1,4 @@
+# Downloaded Three.js files (re-created by tools/build-offline.mjs)
+vendor/
+# Build output
+dist/
