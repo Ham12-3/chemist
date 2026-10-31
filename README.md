@@ -40,11 +40,17 @@ Results appear in a panel with a "Copy report" button. Keep the tab visible whil
 ## Experiments (Phase 1)
 
 0. Free lab: mix any of the chemicals on the bench
-1. Acid–base titration (HCl against NaOH, phenolphthalein, live pH and titration curve)
+1. Acid–base titration (HCl against NaOH, phenolphthalein, live pH and titration curve; a rough run, then repeat runs until two titres are concordant)
 2. Flame tests (Li⁺, Na⁺, K⁺, Ca²⁺, Cu²⁺)
 3. Precipitation reactions (silver halides, copper(II) hydroxide)
 4. Universal indicator and the pH scale
 5. Thermal decomposition of copper(II) carbonate, with the limewater test
+
+Undo (Ctrl+Z, or the arrow button in the top bar) reverses pours, drops, and pipette or burette actions. Drag a test tube to move it to an empty slot in a rack.
+
+## Note for teachers
+
+Hazard labels in the app err on the side of caution. Before using it with a class, check them against your own hazard cards (for example CLEAPSS or SSERC).
 
 ## Code layout (inside `index.html`)
 

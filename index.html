@@ -61,6 +61,7 @@ button{font:inherit;color:inherit}
 .top-actions{display:flex;gap:6px;align-items:center}
 .icon-btn{display:inline-grid;place-items:center;width:36px;height:36px;border-radius:10px;border:1px solid var(--border);background:var(--surface);cursor:pointer}
 .icon-btn:hover{background:var(--surface-2)}
+.icon-btn:disabled{opacity:.4;cursor:default}
 .icon-btn svg{width:18px;height:18px}
 .pill{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;border:1px solid var(--border);background:var(--surface-2);cursor:pointer;font-weight:600;font-size:12.5px;white-space:nowrap}
 .pill .dot{width:8px;height:8px;border-radius:50%;background:var(--danger)}
@@ -241,6 +242,7 @@ h4.sec{margin:14px 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:
     <nav id="expTabs" aria-label="Experiments"></nav>
     <div class="top-actions">
       <button class="pill" id="gogglesPill" title="Put on / take off safety goggles"><span class="dot"></span><span id="gogglesText">Goggles off</span></button>
+      <button class="icon-btn" id="btnUndo" title="Nothing to undo" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></button>
       <button class="icon-btn" id="btnResetView" title="Reset camera view"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 3v6h6"/></svg></button>
       <button class="icon-btn" id="btnLabels" title="Show / hide labels"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg></button>
       <button class="icon-btn" id="btnTheme" title="Theme: auto / light / dark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg></button>
@@ -353,6 +355,7 @@ const stageEl = $('#stage');
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
 renderer.shadowMap.enabled = true;
+renderer.localClippingEnabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.72;
@@ -781,10 +784,13 @@ function vesselGeometry(inner, t, outer = null, lip = true) {
   return new THREE.LatheGeometry(v2(pts), 40);
 }
 /** Liquid (or solid pile) filling a cavity profile up to height h. */
-function fillGeometry(profile, h, inset) {
+function fillGeometry(profile, h, inset, meniscus = 0) {
   const pts = [[0, 0.0004]];
   for (const [r, y] of profile) { if (y >= h) break; pts.push([Math.max(r - inset, 0.0002), Math.max(y, 0.0004)]); }
-  pts.push([Math.max(radiusAt(profile, h) - inset, 0.0002), h], [0, h]);
+  const R = Math.max(radiusAt(profile, h) - inset, 0.0002);
+  // water curves up where it touches glass: the bottom of the meniscus sits at the true level h
+  if (meniscus > 0) pts.push([R, h + meniscus], [R * 0.86, h + meniscus * 0.3], [R * 0.6, h], [0, h]);
+  else pts.push([R, h], [0, h]);
   return new THREE.LatheGeometry(v2(pts), 32);
 }
 function roundBottomProfile(r, len, steps = 8) {
@@ -874,6 +880,9 @@ class Container {
     this.customVisual = o.customVisual || null;
     this.solidScale = o.solidScale ?? 0.005; // metres of pile per gram of solid
     this.liquidMat = new THREE.MeshStandardMaterial({ color: 0xdfeff7, transparent: true, opacity: 0.4, roughness: 0.25, metalness: 0, envMapIntensity: 0.45 });
+    this.clip = new THREE.Plane(V3(0, -1, 0), 1e3);     // keeps the surface level while the vessel is tilted
+    this.liquidMat.clippingPlanes = [this.clip];
+    this.meniscus = o.meniscus ?? (this.profile ? clamp(this.profile[this.profile.length - 1][0] * 0.1, 0.0004, 0.0015) : 0);
     this.liquid = new THREE.Mesh(new THREE.BufferGeometry(), this.liquidMat);
     this.liquid.renderOrder = 1; this.liquid.visible = false;
     this.solidMat = new THREE.MeshStandardMaterial({ color: 0x3e9b6f, roughness: 0.95 });
@@ -904,10 +913,27 @@ class Container {
     if (this.customVisual) { this.customVisual(this); return; }
     if (!this.profile) return;
     const lev = this.m.vol > 0.004 ? this.level() : 0;
-    if (Math.abs(lev - this.lastLevel) > 0.00015) {
-      this.liquid.geometry.dispose();
-      this.liquid.geometry = lev > 0 ? fillGeometry(this.profile, lev, this.inset) : new THREE.BufferGeometry();
-      this.lastLevel = lev;
+    this.parent.getWorldQuaternion(TMP_Q);
+    const tilted = TMP_UP.set(0, 1, 0).applyQuaternion(TMP_Q).y < 0.999;
+    if (tilted && lev > 0) {
+      // While pouring: fill the whole cavity and cut it with a horizontal plane through the surface,
+      // so the liquid stays level instead of tipping with the glass.
+      if (!this.fullGeo) this.fullGeo = fillGeometry(this.profile, this.profile[this.profile.length - 1][1] * 0.99, this.inset);
+      if (this.liquid.geometry !== this.fullGeo) {
+        this.liquid.geometry.dispose(); this.liquid.geometry = this.fullGeo; this.lastLevel = -1;
+        this.liquidMat.side = THREE.DoubleSide; this.liquidMat.needsUpdate = true;
+      }
+      this.clip.constant = this.parent.localToWorld(TMP_V.set(0, lev, 0)).y;
+    } else {
+      if (this.liquid.geometry === this.fullGeo) {
+        this.liquid.geometry = new THREE.BufferGeometry(); this.clip.constant = 1e3;
+        this.liquidMat.side = THREE.FrontSide; this.liquidMat.needsUpdate = true;
+      }
+      if (Math.abs(lev - this.lastLevel) > 0.00015) {
+        this.liquid.geometry.dispose();
+        this.liquid.geometry = lev > 0 ? fillGeometry(this.profile, lev, this.inset, this.meniscus) : new THREE.BufferGeometry();
+        this.lastLevel = lev;
+      }
     }
     this.liquid.visible = lev > 0;
     const grams = Chem.solidGrams(this.m);
@@ -921,7 +947,7 @@ class Container {
     if (sh > 0) this.solidMat.color.lerp(Chem.solidColor(this.m), k);
   }
 }
-const TMP_COLOR = new THREE.Color();
+const TMP_COLOR = new THREE.Color(), TMP_Q = new THREE.Quaternion(), TMP_UP = V3(), TMP_V = V3();
 const PINK = new THREE.Color('#ff3d9a');
 
 /* ---------- Builders for each item ---------- */
@@ -1281,9 +1307,10 @@ function buildDeliveryTube(rig, limeTube) {
 const IONS = {
   'Na+': { z: 1, name: 'sodium' }, 'K+': { z: 1, name: 'potassium' }, 'Li+': { z: 1, name: 'lithium' },
   'Ca2+': { z: 2, name: 'calcium' }, 'Ag+': { z: 1, name: 'silver' }, 'Ba2+': { z: 2, name: 'barium' },
-  'Cu2+': { z: 2, name: 'copper(II)', colour: '#2f80e3', k: 9 },
-  'Fe3+': { z: 3, name: 'iron(III)', colour: '#c9861c', k: 16 },
-  'Fe2+': { z: 2, name: 'iron(II)', colour: '#a6d397', k: 6 },
+  // Ka: hydrated metal ions are weak acids, e.g. [Cu(H₂O)₆]²⁺ ⇌ [Cu(H₂O)₅OH]⁺ + H⁺
+  'Cu2+': { z: 2, name: 'copper(II)', colour: '#2f80e3', k: 9, Ka: 3.2e-8 },
+  'Fe3+': { z: 3, name: 'iron(III)', colour: '#c9861c', k: 16, Ka: 6.3e-3 },
+  'Fe2+': { z: 2, name: 'iron(II)', colour: '#a6d397', k: 6, Ka: 3.2e-10 },
   'Cl-': { z: -1, name: 'chloride' }, 'Br-': { z: -1, name: 'bromide' }, 'I-': { z: -1, name: 'iodide' },
   'NO3-': { z: -1, name: 'nitrate' }, 'SO4 2-': { z: -2, name: 'sulfate' },
 };
@@ -1398,10 +1425,15 @@ const REACTIONS = [
     title: 'Iron(III) ions oxidise iodide', observation: 'The solution turned brown (iodine formed).',
     equation: '2FeCl₃(aq) + 2KI(aq) → 2FeCl₂(aq) + I₂(aq) + 2KCl(aq)', ionic: '2Fe³⁺ + 2I⁻ → 2Fe²⁺ + I₂',
     explain: 'Iron(III) ions are reduced to iron(II) ions and iodide ions are oxidised to iodine, which colours the solution brown.' },
-  { id: 'caco3', type: 'precipitate', reactants: { 'Ca2+': 1, 'CO3': 1 }, requiresBase: true, products: { 'CaCO3(s)': 1 }, effects: { precipitate: true },
+  // limit: only carbonate ions (CO₃²⁻) precipitate – hydrogencarbonate (HCO₃⁻) stays dissolved
+  { id: 'caco3', type: 'precipitate', reactants: { 'Ca2+': 1, 'CO3': 1 }, requiresBase: true, limit: m => Chem.netBase(m) - (m.sp.CO3 || 0), products: { 'CaCO3(s)': 1 }, effects: { precipitate: true },
     title: 'Limewater turns milky: carbon dioxide test', observation: 'The limewater turned milky (cloudy white).',
     equation: 'Ca(OH)₂(aq) + CO₂(g) → CaCO₃(s) + H₂O(l)', ionic: 'Ca²⁺(aq) + 2OH⁻(aq) + CO₂(g) → CaCO₃(s) + H₂O(l)',
-    explain: 'Carbon dioxide reacts with limewater (calcium hydroxide solution) to make tiny particles of insoluble calcium carbonate, which make the liquid look milky. This is the test for carbon dioxide.' },
+    explain: 'Calcium ions join with carbonate ions to make tiny particles of insoluble calcium carbonate, which make the liquid look milky. Bubbling carbon dioxide through limewater (calcium hydroxide solution) does exactly this – it is the test for carbon dioxide.' },
+  { id: 'cahco3', type: 'dissolve', solid: 'CaCO3(s)', extent: m => (m.sp.CO3 || 0) - Chem.netBase(m), products: { 'Ca2+': 1, 'CO3': 1 }, effects: {},
+    title: 'The milky precipitate dissolves', observation: 'The white calcium carbonate dissolved and the liquid cleared.',
+    equation: 'CaCO₃(s) + H₂O(l) + CO₂(g) → Ca(HCO₃)₂(aq)', ionic: 'CaCO₃(s) + H⁺(aq) → Ca²⁺(aq) + HCO₃⁻(aq)',
+    explain: 'Calcium carbonate reacts with acids. Extra carbon dioxide forms carbonic acid, which turns calcium carbonate into calcium hydrogencarbonate – and that dissolves. This is why milky limewater can go clear again if you bubble carbon dioxide through it for a long time.' },
   { id: 'co2', type: 'gas', gasFrom: 'CO3', effects: { gas: true },
     title: 'Fizzing: carbon dioxide gas', observation: 'Fizzing – bubbles of gas were given off.',
     equation: 'NaHCO₃(aq) + HCl(aq) → NaCl(aq) + H₂O(l) + CO₂(g)', ionic: 'HCO₃⁻(aq) + H⁺(aq) → H₂O(l) + CO₂(g)',
@@ -1413,7 +1445,7 @@ const REACTIONS = [
   { id: 'cuco3', type: 'thermal', reactants: { cuco3: 1 }, products: { cuo: 1, CO2: 1 }, conditions: { minTemp: 290 }, rate: 1 / 16, effects: { gas: true },
     title: 'Thermal decomposition of copper(II) carbonate', observation: 'The green solid turned black and a gas was given off.',
     equation: 'CuCO₃(s) → CuO(s) + CO₂(g)', ionic: 'green solid → black solid + carbon dioxide',
-    explain: 'Heat breaks copper(II) carbonate down into two simpler substances: black copper(II) oxide and carbon dioxide gas. Breaking a compound down with heat is called thermal decomposition.' },
+    explain: 'Heat breaks copper(II) carbonate down into two simpler substances: black copper(II) oxide and carbon dioxide gas. Breaking a compound down with heat is called thermal decomposition. (The green powder sold as "copper carbonate" is really basic copper carbonate, CuCO₃·Cu(OH)₂, which also gives off a little water – but the products you see are the same.)' },
 ];
 for (const r of REACTIONS) {
   // how much "base" (OH⁻) one unit of reaction uses = total charge of the ions removed
@@ -1472,6 +1504,11 @@ class Mixture {
   }
   clearLiquid() { this.vol = 0; this.sp = {}; this.ind = {}; this.ppt = {}; this.added = {}; this.touch(); }
   clearAll() { this.clearLiquid(); this.solid = {}; this.solid0 = {}; this.temp = 20; this.touch(); }
+  clone() {
+    const o = new Mixture(); o.vol = this.vol; o.temp = this.temp;
+    for (const k of ['sp', 'ind', 'ppt', 'solid', 'solid0', 'added']) o[k] = { ...this[k] };
+    return o;
+  }
 }
 
 const KW = 1e-14;
@@ -1498,13 +1535,19 @@ const Chem = {
     if (m.vol < 0.001) return null;
     if (m._phVer === m.ver) return m._ph;
     const V = m.vol / 1000;
-    const strong = []; const weak = [];
+    const strong = [], weak = [], hyd = [];
     for (const [k, v] of Object.entries(m.sp)) {
       if (Math.abs(v) < 1e-15) continue;
-      if (IONS[k]) strong.push(IONS[k].z * v / V); else if (WEAK[k]) weak.push([WEAK[k], v / V]);
+      if (IONS[k]) { strong.push(IONS[k].z * v / V); if (IONS[k].Ka) hyd.push([IONS[k].Ka, v / V]); }
+      else if (WEAK[k]) weak.push([WEAK[k], v / V]);
     }
     const S0 = strong.reduce((a, b) => a + b, 0);
-    const f = x => { const h = Math.pow(10, x); let q = h - KW / h + S0; for (const [sys, c] of weak) q += c * avgCharge(sys, h); return q; };
+    const f = x => {
+      const h = Math.pow(10, x); let q = h - KW / h + S0;
+      for (const [sys, c] of weak) q += c * avgCharge(sys, h);
+      for (const [Ka, c] of hyd) q -= c * Ka / (Ka + h);     // metal ions that have lost an H⁺ carry one less charge
+      return q;
+    };
     let lo = -15.5, hi = 1.5;
     for (let i = 0; i < 60; i++) { const mid = (lo + hi) / 2; if (f(mid) > 0) hi = mid; else lo = mid; }
     m._ph = clamp(-(lo + hi) / 2, 0, 14); m._phVer = m.ver;
@@ -1527,9 +1570,17 @@ const Chem = {
           let x = Infinity;
           for (const [k, n] of Object.entries(r.reactants)) x = Math.min(x, (m.sp[k] || 0) / n);
           if (r.requiresBase) x = Math.min(x, this.netBase(m) / r.baseUse);
+          if (r.limit) x = Math.min(x, r.limit(m));
           if (x > 1e-11) {
             for (const [k, n] of Object.entries(r.reactants)) m.sp[k] = Math.max(0, m.sp[k] - n * x);
             for (const [k, n] of Object.entries(r.products)) { if (SOLIDS[k]) m.ppt[k] = (m.ppt[k] || 0) + n * x; else m.sp[k] = (m.sp[k] || 0) + n * x; }
+            fired.push({ rule: r, x }); changed = true;
+          }
+        } else if (r.type === 'dissolve') {
+          const x = Math.min(m.ppt[r.solid] || 0, r.extent(m));
+          if (x > 1e-11) {
+            m.ppt[r.solid] -= x;
+            for (const [k, n] of Object.entries(r.products)) m.sp[k] = (m.sp[k] || 0) + n * x;
             fired.push({ rule: r, x }); changed = true;
           }
         } else if (r.type === 'gas') {
@@ -1780,11 +1831,12 @@ canvas.addEventListener('pointerdown', e => {
   const hit = pick(e.clientX, e.clientY);
   S.down = { x: e.clientX, y: e.clientY, hit, dragging: false };
   const eq = hit?.equip;
-  const dragEq = eq ? (eq.parentEquip || eq) : null;
+  // dragging a test tube lifts it out of its rack; dragging anything else nested moves its parent
+  const dragEq = eq ? ((eq.kind === 'testtube' && eq.parentEquip && eq.movable) ? eq : (eq.parentEquip || eq)) : null;
   if (dragEq && dragEq.movable && !S.busy && !S.mode && !dragEq.lockDrag) {
     controls.enabled = false;
     const p = benchPoint(e.clientX, e.clientY);
-    if (p) { S.down.dragEq = dragEq; S.down.offset = dragEq.group.position.clone().sub(p); S.down.offset.y = 0; }
+    if (p) { S.down.dragEq = dragEq; S.down.offset = dragEq.group.getWorldPosition(V3()).sub(p); S.down.offset.y = 0; }
     canvas.setPointerCapture(e.pointerId);
   }
 });
@@ -1797,7 +1849,7 @@ canvas.addEventListener('pointermove', e => {
       const p = benchPoint(e.clientX, e.clientY);
       if (p) {
         const g = d.dragEq.group;
-        g.position.set(clamp(p.x + d.offset.x, BENCH.xMin, BENCH.xMax), BENCH_Y + 0.03, clamp(p.z + d.offset.z, BENCH.zMin, BENCH.zMax));
+        g.position.set(clamp(p.x + d.offset.x, BENCH.xMin, BENCH.xMax), BENCH_Y + (d.dragEq.kind === 'testtube' ? 0.075 : 0.03), clamp(p.z + d.offset.z, BENCH.zMin, BENCH.zMax));
         moveRiders(d.dragEq);
         S.dragRay = { ray: raycaster.ray.clone(), offset: d.offset.clone() };
         highlightSnap(d.dragEq);
@@ -1835,6 +1887,12 @@ function moveRiders(src) {
   for (const r of ridersOf(src)) r.group.position.set(src.group.position.x, src.group.position.y + src.topY, src.group.position.z);
 }
 function startDrag(eq) {
+  if (eq.kind === 'testtube' && eq.parentEquip) {
+    const rack = eq.parentEquip;
+    eq.fromRack = rack; eq.fromSlot = eq.slot;
+    rack.tubes = rack.tubes.filter(t => t !== eq);
+    scene.attach(eq.group); eq.parentEquip = null;
+  }
   if (S.underBurette === eq) { S.underBurette = null; bus.emit('removedFromBurette', { equip: eq }); }
   if (eq.onSource) { const s = eq.onSource; eq.onSource = null; if (s.kind === 'bunsen') s.tripod.visible = ridersOf(s).length > 0; }
   for (const rig of equipment.filter(x => x.kind === 'boilingtube')) if (rig.bunsen === eq) { rig.bunsen = null; bus.emit('bunsenMoved'); }
@@ -1859,8 +1917,15 @@ function snapDistance(eq, s) {
   }
   return d;
 }
+function snapTolerance(s) { return s.type === 'slot' ? 0.03 : Math.max(0.1, s.r + 0.04); }
+function nearestSnap(eq) {
+  let best = null, bestD = Infinity;
+  for (const s of snapSpotsFor(eq)) { const d = snapDistance(eq, s); if (d < snapTolerance(s) && d < bestD) { best = s; bestD = d; } }
+  return best;
+}
 function highlightSnap(eq) {
-  snapSpotsFor(eq).forEach((s, i) => { const r = snapRings[i]; if (r) r.material.opacity = snapDistance(eq, s) < Math.max(0.1, s.r + 0.04) ? 0.95 : 0.45; });
+  const near = nearestSnap(eq);
+  snapSpotsFor(eq).forEach((s, i) => { const r = snapRings[i]; if (r) r.material.opacity = near && near.pos.distanceTo(s.pos) < 1e-6 ? 0.95 : 0.45; });
 }
 /** Places where an item can "click into" position. */
 function snapSpotsFor(eq) {
@@ -1872,6 +1937,9 @@ function snapSpotsFor(eq) {
       if (s.kind === 'burette' && eq.kind !== 'cylinder' && (!S.underBurette || S.underBurette === eq)) spots.push({ type: 'burette', src: s, pos: s.group.localToWorld(s.snapLocal.clone()), r: 0.06 });
     }
   }
+  if (eq.kind === 'testtube') for (const rk of equipment.filter(x => x.kind === 'rack' && x.onBench)) {
+    rk.slots.forEach((x, i) => { if (!rk.tubes.some(t => t.slot === i)) spots.push({ type: 'slot', src: rk, slot: i, pos: rk.group.localToWorld(V3(x, 0.009, 0)), r: 0.012 }); });
+  }
   if (eq.kind === 'bunsen') for (const rig of equipment.filter(x => x.kind === 'boilingtube')) {
     const p = rig.tubeG.localToWorld(V3(0, 0, 0)); spots.push({ type: 'rig', src: rig, pos: V3(p.x, BENCH_Y, p.z), r: 0.06 });
   }
@@ -1879,11 +1947,15 @@ function snapSpotsFor(eq) {
 }
 function dropItem(eq) {
   hideSnapRings();
-  const g = eq.group; g.position.y = BENCH_Y;
-  const spots = snapSpotsFor(eq);
-  let snapped = null;
-  for (const s of spots) { if (snapDistance(eq, s) < Math.max(0.1, s.r + 0.04)) { snapped = s; break; } }
+  let snapped = nearestSnap(eq);
   S.dragRay = null;
+  if (eq.kind === 'testtube') {               // back into a rack slot – the one aimed at, or where it came from
+    if (snapped) rackAddTube(snapped.src, eq, snapped.slot); else rackAddTube(eq.fromRack, eq, eq.fromSlot);
+    if (snapped && (snapped.src !== eq.fromRack || snapped.slot !== eq.fromSlot)) notebookLog(`Moved ${eq.name.toLowerCase()} to another place in the rack.`, 'action');
+    bus.emit('moved', { equip: eq }); renderCard();
+    return;
+  }
+  const g = eq.group; g.position.y = BENCH_Y;
   if (snapped?.type === 'heat') {
     if (!heatAllowed(eq, snapped.src)) snapped = null;
     else {
@@ -2016,6 +2088,35 @@ function handleModeTarget(t) {
   }
 }
 
+/* ---------- Undo: snapshots of every container before each action ---------- */
+const History = {
+  stack: [],
+  push(label) {
+    this.stack.push({
+      label,
+      snap: equipment.filter(e => e.container && !e.container.infinite).map(e => ({ e, m: e.container.m.clone() })),
+      burettes: equipment.filter(e => e.kind === 'burette').map(b => ({ b, dispensed: b.dispensed, fillVol: b.fillVol, runStart: b.runStart })),
+      results: JSON.parse(JSON.stringify(S.results)), titr: JSON.parse(JSON.stringify(S.titr)),
+    });
+    if (this.stack.length > 25) this.stack.shift();
+    updateUndoButton();
+  },
+  top() { return this.stack[this.stack.length - 1]; },
+  undo() {
+    if (S.busy) return;
+    const h = this.stack.pop();
+    if (!h) return toast({ title: 'Nothing to undo', text: 'Pours, drops and pipette or burette actions can be undone.', time: 3000 });
+    for (const { e, m } of h.snap) if (equipment.includes(e)) { e.container.m = m; e.container.appVer = -1; e.container.lastLevel = -1; e.container.lastSolid = -1; }
+    for (const x of h.burettes) { Object.assign(x.b, { dispensed: x.dispensed, fillVol: x.fillVol, runStart: x.runStart }); if (x.b.tap !== 'closed') { x.b.tap = 'closed'; x.b.tapHandle.rotation.x = 0; } }
+    S.results = h.results; S.titr = h.titr; S.titr.dirty = true; nbDirty = true;
+    notebookLog(`Undo: ${h.label}.`, 'action');
+    toast({ title: 'Undone', text: `"${h.label}" was undone. Steps you have already completed stay completed.`, time: 3500 });
+    updateUndoButton(); renderCard();
+  },
+  clear() { this.stack = []; updateUndoButton(); },
+};
+function updateUndoButton() { const b = $('#btnUndo'); if (b) { b.disabled = !History.stack.length; b.title = History.stack.length ? `Undo: ${History.top().label} (Ctrl+Z)` : 'Nothing to undo'; } }
+
 /* ---------- Mixing: the heart of every pour, drop and transfer ---------- */
 /** Add a mixture to a container, then let the chemistry engine react it. */
 function mergeInto(tgt, piece) {
@@ -2059,6 +2160,7 @@ function onReaction(e, rule, x) {
 
 /* ---------- Pouring ---------- */
 async function doPour(src, tgt, amount) {
+  History.push(tgt === sinkItem ? `Empty the ${src.name.toLowerCase()}` : `Pour into the ${tgt.name.toLowerCase()}`);
   S.busy++; renderCard();
   const g = src.group, parent = g.parent;
   const homeLocal = g.position.clone(), homeQuat = g.quaternion.clone();
@@ -2102,7 +2204,7 @@ async function doPour(src, tgt, amount) {
     notebookLog(`Emptied and rinsed the ${src.name.toLowerCase()} in the sink.`, 'action');
     bus.emit('emptied', { source: src });
   } else {
-    if (tgt.kind === 'burette') { tgt.dispensed = 0; tgt.fillVol = tgt.container.vol; S.titr.points = []; S.titr.end = null; S.titr.dirty = true; }
+    if (tgt.kind === 'burette') { tgt.dispensed = 0; tgt.runStart = 0; tgt.fillVol = tgt.container.vol; S.titr.points = []; S.titr.end = null; S.titr.dirty = true; }
     const what = src.container.infinite ? SUBSTANCES[src.container.substance].name.toLowerCase() : 'the contents of the ' + src.name.toLowerCase();
     notebookLog(`Poured ${fmt(amount, amount < 10 ? 1 : 0)} cm³ of ${what} into the ${tgt.name.toLowerCase()}.`, 'action');
     bus.emit('pour', { source: src, target: tgt, volume: amount, substance: src.container.substance });
@@ -2114,7 +2216,7 @@ function emptyToSink(src) {
     if (src.container && Chem.solidGrams(src.container.m) > 0) { src.container.m.clearAll(); notebookLog(`Cleaned out the ${src.name.toLowerCase()}.`, 'action'); renderCard(); return; }
     return toast({ title: 'Nothing to empty', text: `The ${src.name.toLowerCase()} is already empty.`, kind: 'warn', time: 3000 });
   }
-  if (src.kind === 'burette') { src.container.m.clearAll(); src.dispensed = 0; notebookLog('Emptied the burette.', 'action'); renderCard(); return; }
+  if (src.kind === 'burette') { History.push('Empty the burette'); src.container.m.clearAll(); src.dispensed = 0; src.runStart = 0; notebookLog('Emptied the burette.', 'action'); renderCard(); return; }
   if (src.kind === 'pipette' || !src.movable && !src.parentEquip) { src.container.m.clearAll(); renderCard(); return; }
   requireGoggles(() => doPour(src, sinkItem, src.container.vol));
 }
@@ -2127,6 +2229,7 @@ function makeDropperProp() {
   return g;
 }
 async function doDrops(bottle, tgt, n) {
+  History.push(`Add drops of ${SUBSTANCES[bottle.substance].name.toLowerCase()}`);
   S.busy++; renderCard();
   const prop = makeDropperProp();
   const mouth = tgt.mouthWorld();
@@ -2156,6 +2259,7 @@ async function doDrops(bottle, tgt, n) {
 /* ---------- Pipette ---------- */
 async function moveGroup(g, to, dur) { const from = g.position.clone(); await tween(dur, t => g.position.lerpVectors(from, to, ease(t))); }
 async function pipetteFill(pip, src) {
+  History.push('Fill the pipette');
   S.busy++; renderCard();
   const g = pip.group, home = g.position.clone(), c = pip.container;
   const mouth = src.mouthWorld();
@@ -2178,6 +2282,7 @@ async function pipetteFill(pip, src) {
   startMode('pipetteRelease', pip, 'Now click the container to release the 25.0 cm³ into.');
 }
 async function pipetteRelease(pip, tgt) {
+  History.push('Release the pipette');
   S.busy++; renderCard();
   const g = pip.group, home = g.position.clone(), c = pip.container;
   const mouth = tgt.mouthWorld();
@@ -2204,13 +2309,14 @@ async function pipetteRelease(pip, tgt) {
 
 /* ---------- Burette ---------- */
 async function buretteFill(bur, src) {
+  History.push('Fill the burette');
   S.busy++; renderCard();
   const c = bur.container;
   c.m.clearAll();
   const total = src.container.infinite ? 50 : Math.min(50, src.container.vol);
   let moved = 0;
   await tween(1.2, t => { const want = total * t, step = want - moved; if (step > 1e-6) { c.m.merge(takeFrom(src, step)); moved = want; } });
-  bur.dispensed = 0; bur.fillVol = c.m.vol;
+  bur.dispensed = 0; bur.runStart = 0; bur.fillVol = c.m.vol;
   S.titr.points = []; S.titr.dirty = true; S.titr.end = null;
   S.busy--;
   const name = src.container.infinite ? SUBSTANCES[src.container.substance].name.toLowerCase() : 'liquid from the ' + src.name.toLowerCase();
@@ -2224,6 +2330,7 @@ function setTap(bur, mode) {
     if (!S.underBurette) return toast({ title: 'Nothing under the burette!', text: 'Place a flask under the burette tip (on the white tile) before opening the tap, or the liquid will spill on the bench.', kind: 'warn', time: 5000 });
     if (!S.goggles) return requireGoggles(() => setTap(bur, mode));
   }
+  if (mode !== 'closed' && History.top()?.label !== 'Add from the burette') History.push('Add from the burette');
   bur.tap = mode;
   bur.tapHandle.rotation.x = mode === 'closed' ? 0 : mode === 'slow' ? 0.6 : Math.PI / 2;
   bus.emit('tap', { mode });
@@ -2234,6 +2341,7 @@ function buretteDrop(bur) {
   const tgt = S.underBurette;
   if (!tgt) return toast({ title: 'Nothing under the burette!', text: 'Place a flask on the white tile under the burette first.', kind: 'warn', time: 4000 });
   if (!S.goggles) return requireGoggles(() => buretteDrop(bur));
+  if (bur.tap === 'closed' && History.top()?.label !== 'Add from the burette') History.push('Add from the burette');
   const vol = Math.min(DROP_ML, bur.container.vol);
   const piece = bur.container.m.split(vol / bur.container.m.vol);
   bur.dispensed += vol;
@@ -2241,19 +2349,43 @@ function buretteDrop(bur) {
   fallingDrop(tip, tgt, bur.container.appearance().color, () => { buretteDeliver(bur, tgt, piece); bus.emit('buretteDrop', {}); });
   renderCard();
 }
-/** Burette liquid reaches the flask: mix, show the brief pink flash near the end point, record the curve. */
+/** All titration runs recorded so far (run 1 is the rough run). */
+function titrationRuns() { return Object.values(S.results.titration || {}).sort((a, b) => a.n - b.n); }
+/** The largest group of accurate titres that agree within 0.10 cm³, and their mean. */
+function concordantSet() {
+  const acc = titrationRuns().filter(r => !r.rough).map(r => r.titre).sort((a, b) => a - b);
+  let best = null;
+  for (let i = 0; i < acc.length; i++) for (let j = i + 1; j < acc.length; j++) {
+    if (acc[j] - acc[i] <= 0.1001) { const set = acc.slice(i, j + 1); if (!best || set.length > best.length) best = set; }
+  }
+  return best ? { titres: best, mean: best.reduce((a, b) => a + b, 0) / best.length } : null;
+}
+/** Burette liquid reaches the flask: mix, show the brief pink flash near the end point, record the curve and each run. */
 function buretteDeliver(bur, tgt, piece) {
+  const isFlask = tgt.kind === 'flask' || tgt.kind === 'beaker';
+  // a flask with none of the burette liquid in it yet = a new titration run
+  if (isFlask && !Object.keys(piece.added).some(id => (tgt.container.m.added[id] || 0) > 1e-9)) {
+    bur.runStart = bur.dispensed - piece.vol;
+    S.titr.points = []; S.titr.end = null; S.titr.dirty = true;
+  }
   const before = Chem.pH(tgt.container.m);
   mergeInto(tgt, piece);
   const m = tgt.container.m, pH = Chem.pH(m);
   if (m.ind.php && pH != null && pH < 8.2 && Chem.basicity(piece) > 0 && before != null) tgt.container.flash = Math.max(tgt.container.flash, smoothstep(2.2, 5, pH) * 0.55);
-  if (tgt.kind === 'flask' || tgt.kind === 'beaker') {
+  if (isFlask) {
+    const v = bur.dispensed - (bur.runStart || 0);
     const pts = S.titr.points, last = pts[pts.length - 1];
-    if (!last || Math.abs(bur.dispensed - last.v) >= 0.049 || Math.abs(pH - last.pH) > 0.3) { pts.push({ v: bur.dispensed, pH }); S.titr.dirty = true; }
+    if (!last || Math.abs(v - last.v) >= 0.049 || Math.abs(pH - last.pH) > 0.3) { pts.push({ v, pH }); S.titr.dirty = true; }
     if (m.ind.php && pH >= 8.2 && !S.titr.end) {
-      S.titr.end = { v: bur.dispensed, pH };
-      notebookLog(`End point: the solution turned pink at a burette reading of ${fmt(50 - bur.fillVol + bur.dispensed, 2)} cm³.`, 'obs');
-      bus.emit('endpoint', { v: bur.dispensed, pH });
+      S.titr.end = { v, pH };
+      const initial = 50 - bur.fillVol + (bur.runStart || 0), final = 50 - bur.fillVol + bur.dispensed, n = titrationRuns().length + 1;
+      recordResult('titration', 'run' + n, { n, initial, final, titre: final - initial, rough: n === 1 });
+      notebookLog(`Run ${n}${n === 1 ? ' (rough)' : ''}: end point – pale pink at a burette reading of ${fmt(final, 2)} cm³ (titre ${fmt(final - initial, 2)} cm³).`, 'obs');
+      if (bur.tap !== 'closed') {
+        bur.tap = 'closed'; bur.tapHandle.rotation.x = 0; renderCard();
+        toast({ title: 'End point reached', text: 'The tap has been closed for you. Now read the burette.', kind: 'ok', time: 3500 });
+      }
+      bus.emit('endpoint', { v, pH, run: n });
     }
   }
   bus.emit('buretteAdd', { target: tgt, pH });
@@ -2423,8 +2555,7 @@ function routeGas(rig, n, dt) {
   const lime = rig.limeTube;
   if (rig.deliveryIn && lime.container.vol > 0.5) {
     const m = lime.container.m;
-    const room = Math.max(0, (m.sp['Ca2+'] || 0) - (m.sp.CO3 || 0));
-    const add = Math.min(n * 0.03, room);     // only part of the gas reacts as it bubbles through
+    const add = n * 0.012;     // only a little of the gas dissolves as the bubbles pass through
     if (add > 0) { m.sp.CO3 = (m.sp.CO3 || 0) + add; m.touch(); for (const f of Chem.react(m)) onReaction(lime, f.rule, f.x); }
     const end = rig.deliveryEnd;
     const surf = lime.container.surfaceWorld().y;
@@ -2539,6 +2670,7 @@ function updateHover() {
 /* ---------- Keyboard ---------- */
 window.addEventListener('keydown', e => {
   if (e.target.closest('input, textarea')) return;
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); History.undo(); return; }
   if (e.key === 'Escape') { if ($('#modalBackdrop').classList.contains('show')) closeModal(); else if (S.mode) cancelMode(); else deselect(); }
   if (e.key === 'd' || e.key === 'D') { const b = equipment.find(x => x.kind === 'burette'); if (b && !S.busy) buretteDrop(b); }
   if (e.key === 'r' || e.key === 'R') resetView();
@@ -2579,7 +2711,7 @@ const EXPERIMENTS = [
       addEquip(makeBeaker(100), 0.63, 0.34);
       addEquip(makeFlask(), -0.42, 0.3);
       addEquip(makeCylinder(), 0.8, 0.3);
-      addEquip(makeRack(4, [1, 2, 3, 4].map(i => labelledTube(String(i)))), 1.1, 0.06);
+      addEquip(makeRack(6, [1, 2, 3, 4].map(i => labelledTube(String(i)))), 1.1, 0.06);
       addEquip(makePipette(), 0.36, -0.2);
       ['hcl', 'naoh', 'water', 'nacl', 'cuso4', 'fecl3', 'limewater', 'nahco3', 'ethanol', 'ki'].forEach((id, i) => addEquip(makeReagent(id), -1.52 + i * 0.08, -0.22));
       ['php', 'ui', 'agno3', 'naoh_drop'].forEach((id, i) => addEquip(makeDropper(id), 0.08 + i * 0.065, 0.45));
@@ -2593,7 +2725,7 @@ const EXPERIMENTS = [
   {
     id: 'titration', num: 1, title: 'Acid–base titration', short: 'Titration',
     sub: 'Find the exact concentration of hydrochloric acid using sodium hydroxide.',
-    aim: 'To find the exact concentration of a hydrochloric acid solution by titrating 25.0 cm³ of it with 0.100 mol/dm³ sodium hydroxide, using phenolphthalein as the indicator.',
+    aim: 'To find the exact concentration of a hydrochloric acid solution by titrating 25.0 cm³ of it with 0.100 mol/dm³ sodium hydroxide, using phenolphthalein as the indicator. You will do a quick rough run, then accurate runs until two titres agree within 0.10 cm³ (concordant results).',
     equipment: ['Burette on a clamp stand', 'White tile', '25.0 cm³ pipette with filler', 'Conical flask', 'Phenolphthalein indicator', 'Sodium hydroxide, 0.100 mol/dm³', 'Hydrochloric acid (unknown concentration)', 'Safety goggles'],
     safety: ['Sodium hydroxide and hydrochloric acid are irritants – wear goggles to protect your eyes.', 'Always use a pipette filler. Never pipette by mouth.', 'Fill the burette below eye level using a funnel, then remove the funnel.', 'Phenolphthalein is dissolved in ethanol, which is flammable.'],
     readouts: true,
@@ -2640,32 +2772,43 @@ const EXPERIMENTS = [
         check: () => S.underBurette?.kind === 'flask',
       },
       {
-        text: 'Open the tap and add sodium hydroxide. Go fast at first, then drop by drop, until the solution turns a pale pink that stays.',
-        hint: 'Select the burette. Use "Fast" until about 20 cm³, then close the tap and use "Add 1 drop" (or press D). The flask is swirled for you. Watch for brief pink flashes – they mean you are close!',
-        progress: () => { const b = find('burette'); return b ? `Added: ${fmt(b.dispensed, 2)} cm³` : ''; },
-        check: ev => {
-          const fl = S.underBurette; if (!fl || ev.type !== 'buretteAdd') return;
-          const m = fl.container.m; if (!m.ind.php || !m.added.hcl_unknown) return;
-          const pH = Chem.pH(m);
-          if (pH >= 8.2) return pH > 11 ? { pass: true, note: 'You overshot the end point – the pink is quite dark. In a real lab you would repeat the titration more carefully. Your reading is still recorded.' } : { pass: true, note: 'End point reached: a pale permanent pink! The tap has been closed.' };
-        },
-        onPass: () => { const b = find('burette'); if (b && b.tap !== 'closed') setTap(b, 'closed'); },
+        text: 'Rough titration: open the tap and add sodium hydroxide quickly, until the solution turns pink. This shows you roughly where the end point is.',
+        hint: 'Select the burette and choose "Fast". Watch for pink flashes – they mean you are close. The flask is swirled for you, and the tap closes automatically at the end point.',
+        progress: () => { const b = find('burette'); return b ? `Added this run: ${fmt(b.dispensed - (b.runStart || 0), 2)} cm³` : ''; },
+        check: ev => ev.type === 'endpoint' ? { pass: true, note: 'Rough titre recorded. A rough run usually overshoots a little – that is why the next runs are done carefully.' } : undefined,
       },
       {
         type: 'input', unit: 'cm³',
-        text: 'Read the burette. What is your titre (the volume of sodium hydroxide you added)?',
-        hint: 'Titre = final reading − initial reading. The initial reading was 0.00 cm³. The final reading is shown on the burette card and in the readings above.',
-        verify: v => { const b = find('burette'); const t = b.dispensed; return Math.abs(v - t) <= 0.06 ? true : { fail: `Not quite. Final reading − initial reading (0.00 cm³). Read to 2 decimal places.` }; },
-        onPass: v => { const b = find('burette'); S.titre = b.dispensed; recordResult('titration', 'run1', { initial: 0, final: b.dispensed, titre: b.dispensed }); },
+        text: 'Read the burette. What was your rough titre?',
+        hint: 'Titre = final reading − initial reading. The initial reading was 0.00 cm³. The final reading is on the burette card and in the live readings below.',
+        verify: v => { const r = titrationRuns()[0]; return r && Math.abs(v - r.titre) <= 0.06 ? true : { fail: 'Not quite. Titre = final reading − initial reading. Give your answer to 2 decimal places.' }; },
+      },
+      {
+        text: 'Accurate titrations: repeat the titration carefully until two titres agree within 0.10 cm³ (concordant results).',
+        hint: 'Empty the flask in the sink, pipette another 25.0 cm³ of acid into it, add 3 drops of indicator and stand it under the burette. Refill the burette if less than about 25 cm³ is left. Run in quickly to about 1 cm³ below your rough titre, then add drop by drop.',
+        progress: () => { const runs = titrationRuns().filter(r => !r.rough); return runs.length ? runs.map(r => `Run ${r.n}: ${fmt(r.titre, 2)} cm³`).join(' · ') : 'No accurate runs yet'; },
+        check: ev => {
+          if (ev.type !== 'endpoint' && ev.type !== 'enter') return;
+          const c = concordantSet();
+          if (c) return { pass: true, note: `Concordant titres: ${c.titres.map(t => fmt(t, 2)).join(' and ')} cm³.` };
+          if (ev.type === 'endpoint' && titrationRuns().filter(r => !r.rough).length >= 2) return { fail: 'These titres are more than 0.10 cm³ apart. Do another run – go slowly near the end point.' };
+        },
+      },
+      {
+        type: 'input', unit: 'cm³',
+        text: 'Work out the mean (average) of your concordant titres.',
+        hint: 'Add the concordant titres together and divide by how many there are. Do not include the rough titre.',
+        verify: v => { const c = concordantSet(); return c && Math.abs(v - c.mean) <= 0.02 ? true : { fail: 'Use only the concordant titres (ticked in your notebook), not the rough one.' }; },
+        onPass: () => { S.titre = concordantSet().mean; },
       },
       {
         type: 'input', unit: 'mol/dm³',
         text: 'Calculate the concentration of the hydrochloric acid.',
-        hint: 'Moles of NaOH = 0.100 × titre ÷ 1000. HCl + NaOH → NaCl + H₂O, so moles of HCl = moles of NaOH. Concentration = moles ÷ (25.0 ÷ 1000).',
-        verify: v => { const c = 0.100 * S.titre / 25.0; return Math.abs(v - c) / c <= 0.025 ? true : { fail: 'Check your working: moles NaOH = 0.100 × titre ÷ 1000; concentration of HCl = moles ÷ 0.0250 dm³.' }; },
-        onPass: v => {
+        hint: 'Moles of NaOH = 0.100 × mean titre ÷ 1000. HCl + NaOH → NaCl + H₂O, so moles of HCl = moles of NaOH. Concentration = moles ÷ (25.0 ÷ 1000).',
+        verify: v => { const c = 0.100 * S.titre / 25.0; return Math.abs(v - c) / c <= 0.025 ? true : { fail: 'Check your working: moles NaOH = 0.100 × mean titre ÷ 1000; concentration of HCl = moles ÷ 0.0250 dm³.' }; },
+        onPass: () => {
           const c = 0.100 * S.titre / 25.0, real = SUBSTANCES.hcl_unknown.conc;
-          recordResult('titration', 'run1', { ...S.results.titration.run1, conc: c, real });
+          S.results.calc = { mean: S.titre, conc: c, real }; nbDirty = true;
           notebookLog(`Result: concentration of HCl = ${fmt(c, 4)} mol/dm³ (the bottle was actually ${fmt(real, 4)} mol/dm³).`, 'result');
           return `Correct! You found ${fmt(c, 4)} mol/dm³. Your teacher's value was ${fmt(real, 4)} mol/dm³.`;
         },
@@ -2699,7 +2842,7 @@ const EXPERIMENTS = [
       { text: 'Clean the wire loop: dip it into the beaker of hydrochloric acid.', hint: 'Select the wire loop → "Dip into…" → click the acid beaker.', check: ev => ev.type === 'wireClean' },
       {
         text: 'Test all five samples. For each one: dip the clean wire in the solid, hold it in the flame, then clean the wire in the acid again.',
-        hint: 'Wire loop → "Dip into…" → click a watch glass → "Hold in flame". Then dip into the acid to clean it before the next sample.',
+        hint: 'Wire loop → "Dip into…" → click a watch glass → "Hold in flame". Then dip into the acid to clean it before the next sample. Potassium\'s lilac is pale – look carefully.',
         progress: () => ['Li+', 'Na+', 'K+', 'Ca2+', 'Cu2+'].map(i => (S.results.flame?.[i] ? '✓ ' : '○ ') + FLAME[i].metal).join(' · '),
         check: ev => {
           if (ev.type === 'flameTest' && ev.contaminated) return { fail: 'That result is not reliable – the wire was not cleaned between samples. Clean it in the acid and test again.' };
@@ -2722,7 +2865,7 @@ const EXPERIMENTS = [
     equipment: ['Test-tube rack with 4 test tubes', 'Sodium chloride, potassium bromide, potassium iodide and copper(II) sulfate solutions', 'Silver nitrate (dropper)', 'Sodium hydroxide (dropper)', 'Safety goggles'],
     safety: ['Wear goggles – silver nitrate and sodium hydroxide can harm your eyes.', 'Silver nitrate stains skin black – wash off any splashes at once.', 'Copper(II) sulfate is harmful if swallowed.', 'Dispose of silver residues as your teacher tells you (not down the sink).'],
     setup() {
-      addEquip(makeRack(4, [1, 2, 3, 4].map(i => labelledTube(String(i)))), 0.05, 0.12);
+      addEquip(makeRack(6, [1, 2, 3, 4].map(i => labelledTube(String(i)))), 0.05, 0.12);
       [['nacl', -0.95], ['kbr', -0.72], ['ki', -0.49], ['cuso4', -0.26]].forEach(([id, x]) => addEquip(makeReagent(id), x, -0.2));
       addEquip(makeDropper('agno3'), 0.4, 0.15);
       addEquip(makeDropper('naoh_drop'), 0.55, 0.15);
@@ -2739,7 +2882,7 @@ const EXPERIMENTS = [
           return ev.volume > 5 ? { pass: true, note: 'That is more than you need – 1–2 cm³ is enough for a test.' } : true;
         },
       },
-      { text: 'Add 3 drops of silver nitrate to the sodium chloride.', hint: 'Select the silver nitrate dropper → "Add drops to…" → click the tube.', check: ev => ev.type === 'reaction' && ev.rule === 'agcl' },
+      { text: 'Add 3 drops of silver nitrate to the sodium chloride.', hint: 'Select the silver nitrate dropper → "Add drops to…" → click the tube. (In a real halide test you first add a little dilute nitric acid, which removes carbonate ions that would also give a white precipitate.)', check: ev => ev.type === 'reaction' && ev.rule === 'agcl' },
       { text: 'Test potassium bromide: pour about 2 cm³ into a clean tube and add silver nitrate.', hint: 'Use a new empty tube so the results do not mix.', check: ev => ev.type === 'reaction' && ev.rule === 'agbr' },
       { text: 'Test potassium iodide in the same way.', hint: 'Pour about 2 cm³ of potassium iodide into the next empty tube, then add silver nitrate drops.', check: ev => ev.type === 'reaction' && ev.rule === 'agi' },
       { text: 'Pour about 2 cm³ of copper(II) sulfate into the last tube and add sodium hydroxide drops.', hint: 'Select the sodium hydroxide dropper → "Add drops to…" → click the tube with copper(II) sulfate.', check: ev => ev.type === 'reaction' && ev.rule === 'cuoh2' },
@@ -2819,7 +2962,7 @@ const EXPERIMENTS = [
     },
     steps: [
       gogglesStep,
-      { type: 'next', text: 'Look at the set-up. The boiling tube contains green copper(II) carbonate. The delivery tube carries any gas into the limewater.', hint: 'Zoom in with the scroll wheel to look closely. Click the boiling tube to see what is inside.' },
+      { type: 'next', text: 'Look at the set-up. The boiling tube contains green copper(II) carbonate. The delivery tube carries any gas into the limewater.', hint: 'Zoom in with the scroll wheel to look closely. Click the boiling tube to see what is inside. (The green powder sold as "copper carbonate" is really basic copper carbonate, CuCO₃·Cu(OH)₂ – it decomposes in the same way.)' },
       { text: 'Move the Bunsen burner under the boiling tube.', hint: 'Drag the Bunsen burner onto the green ring under the tube.', check: () => !!find('boilingtube', r => r.bunsen) },
       { text: 'Light the Bunsen burner and open the air hole to get a blue flame.', hint: 'Select the burner → "Light" → "Open air hole". A blue flame is hot enough for decomposition.', check: () => !!find('boilingtube', r => r.bunsen?.on && r.bunsen.air) },
       {
@@ -3061,10 +3204,13 @@ function renderNotebook() {
   nbDirty = false;
   const el = $('#panelNotebook'); if (el.hidden) return;
   const r = S.results; let h = `<h4 class="sec" style="margin-top:0">${esc(Runner.exp?.title || '')}</h4>`;
-  if (r.titration?.run1) {
-    const t = r.titration.run1;
-    h += `<table class="results"><tr><th>Initial reading</th><th>Final reading</th><th>Titre</th></tr><tr><td>0.00 cm³</td><td>${fmt(t.final, 2)} cm³</td><td><b>${fmt(t.titre, 2)} cm³</b></td></tr></table>`;
-    if (t.conc) h += `<p style="font-size:13px">Moles NaOH = 0.100 × ${fmt(t.titre, 2)} ÷ 1000 = ${(0.1 * t.titre / 1000).toExponential(3)} mol<br>Concentration HCl = moles ÷ 0.0250 dm³ = <b>${fmt(t.conc, 4)} mol/dm³</b></p>`;
+  const runs = titrationRuns();
+  if (runs.length) {
+    const cc = concordantSet();
+    h += `<table class="results"><tr><th>Run</th><th>Initial / cm³</th><th>Final / cm³</th><th>Titre / cm³</th></tr>${runs.map(t => `<tr><td>${t.rough ? 'Rough' : t.n}</td><td>${fmt(t.initial, 2)}</td><td>${fmt(t.final, 2)}</td><td><b>${fmt(t.titre, 2)}</b>${!t.rough && cc && cc.titres.includes(t.titre) ? ' ✓' : ''}</td></tr>`).join('')}</table>`;
+    if (cc) h += `<p style="font-size:13px">Concordant titres (✓) agree within 0.10 cm³. Mean titre = <b>${fmt(cc.mean, 2)} cm³</b>.</p>`;
+    const calc = r.calc;
+    if (calc) h += `<p style="font-size:13px">Moles NaOH = 0.100 × ${fmt(calc.mean, 2)} ÷ 1000 = ${(0.1 * calc.mean / 1000).toExponential(3)} mol<br>Concentration HCl = moles ÷ 0.0250 dm³ = <b>${fmt(calc.conc, 4)} mol/dm³</b></p>`;
   }
   if (r.flame) h += `<table class="results"><tr><th>Sample</th><th>Metal ion</th><th>Flame colour</th></tr>${Object.values(r.flame).map(f => `<tr><td>${esc(f.sample)}</td><td>${esc(f.ion)}</td><td><span class="swatch" style="display:inline-block;vertical-align:-2px;background:${f.hex}"></span> ${esc(f.colour)}</td></tr>`).join('')}</table>`;
   if (r.precip) h += `<table class="results"><tr><th>Tube</th><th>Mixed</th><th>Observation</th></tr>${Object.values(r.precip).map(p => `<tr><td>${esc(p.tube)}</td><td>${esc(p.mix)}</td><td>${esc(p.result)}</td></tr>`).join('')}</table>`;
@@ -3089,6 +3235,7 @@ const Runner = {
     clearBench();
     this.exp = exp; this.i = 0; this.feedback = null; this.completed = false; this.showHint = false;
     S.notebook = []; S.results = {}; S.logged.clear(); S.explained.clear(); S.warned.clear(); S.t0 = performance.now(); S.titre = null;
+    History.clear();
     exp.setup();
     rebuildPickables();
     setGoggles(false);
@@ -3134,7 +3281,8 @@ function renderSteps() {
       <li>Titrate sodium hydroxide into hydrochloric acid with phenolphthalein, using the burette.</li>
       <li>Mix copper(II) sulfate or iron(III) chloride with sodium hydroxide.</li>
       <li>Add silver nitrate to sodium chloride or potassium iodide.</li>
-      <li>Bubble… well, pour hydrochloric acid onto sodium hydrogencarbonate and watch it fizz.</li>
+      <li>Pour hydrochloric acid into sodium hydrogencarbonate solution and watch it fizz.</li>
+      <li>Drag a test tube out of the rack to move it to an empty slot.</li>
       <li>Heat water on the hot plate until it boils.</li>
       <li>Try limewater + sodium hydrogencarbonate. What do you see?</li></ul>
       <p style="color:var(--muted);font-size:12.5px">Every reaction is checked by the chemistry engine and recorded in your notebook.</p>`;
@@ -3161,7 +3309,7 @@ function renderSteps() {
     h += `</ol>`;
     if (Runner.completed) h += `<div class="readout" style="padding:14px;margin-top:10px"><b>🎉 Experiment complete!</b><span>Check your notebook, then test yourself with the quiz.</span><div style="margin-top:8px"><button class="btn primary small" data-step="quiz">Take the quiz</button></div></div>`;
   }
-  if (exp.readouts) h += `<h4 class="sec">Live readings</h4><div class="readouts"><div class="readout"><b id="roReading">–</b><span>Burette reading (cm³)</span></div><div class="readout"><b id="roPH">–</b><span>pH in flask</span></div><div class="readout"><b id="roAdded">–</b><span>NaOH added (cm³)</span></div></div>
+  if (exp.readouts) h += `<h4 class="sec">Live readings</h4><div class="readouts"><div class="readout"><b id="roReading">–</b><span>Burette reading (cm³)</span></div><div class="readout"><b id="roPH">–</b><span>pH in flask</span></div><div class="readout"><b id="roAdded">–</b><span>NaOH added this run (cm³)</span></div></div>
     <div class="graph-wrap"><canvas id="graph"></canvas></div><p style="font-size:12px;color:var(--muted);margin:4px 0 0">Titration curve: pH of the flask against volume of NaOH added. The pink band is where phenolphthalein changes colour.</p>`;
   el.innerHTML = h;
   S.titr.dirty = true;
@@ -3200,7 +3348,7 @@ function updateReadouts() {
   set('roReading', b && b.container.vol > 0 ? fmt(50 - b.container.vol, 2) : '–');
   const p = fl && Chem.pH(fl.container.m);
   set('roPH', p != null ? fmt(p, 2) : '–');
-  set('roAdded', b ? fmt(b.dispensed, 2) : '–');
+  set('roAdded', b ? fmt(b.dispensed - (b.runStart || 0), 2) : '–');
   const prog = document.querySelector('.step.current .prog'); if (prog && Runner.step?.progress) prog.textContent = Runner.step.progress();
 }
 function updateProgressLine() {
@@ -3333,6 +3481,7 @@ function setupUI() {
   };
   $('#gogglesPill').onclick = () => setGoggles(!S.goggles);
   $('#btnResetView').onclick = resetView;
+  $('#btnUndo').onclick = () => History.undo();
   $('#btnHelp').onclick = showHelp;
   $('#btnLabels').onclick = () => { S.showLabels = !S.showLabels; tags.forEach(t => t.visible = S.showLabels); };
   $('#btnTheme').onclick = () => applyTheme((themeIdx + 1) % 3);
@@ -3452,14 +3601,14 @@ async function runSelfTests() {
   for (const [id, s] of Object.entries(SUBSTANCES)) for (const k of [...Object.keys(s.ions || {}), ...Object.keys(s.systems || {})]) if (!IONS[k] && !WEAK[k]) bad.push(`${id}:${k}`);
   ok('Data', 'Every substance uses known ions / weak-acid systems', !bad.length, bad.join(', '));
   const badR = [];
-  for (const r of REACTIONS) for (const k of Object.keys(r.products || {})) if (!SOLIDS[k] && !IONS[k] && !MOLECULES[k] && !SUBSTANCES[k] && k !== 'CO2') badR.push(`${r.id}:${k}`);
+  for (const r of REACTIONS) for (const k of Object.keys(r.products || {})) if (!SOLIDS[k] && !IONS[k] && !MOLECULES[k] && !WEAK[k] && !SUBSTANCES[k] && k !== 'CO2') badR.push(`${r.id}:${k}`);
   ok('Data', 'Every reaction product is defined', !badR.length, badR.join(', '));
   ok('Data', 'Every reaction has an observation, equation and explanation', REACTIONS.every(r => r.observation && r.equation && r.explain));
   ok('Data', 'Every experiment step has text and a check', EXPERIMENTS.every(e => e.steps.every(s => s.text && (s.check || s.type))));
   ok('Data', 'Every guided experiment has a valid 3-question quiz', EXPERIMENTS.filter(e => e.steps.length).every(e => e.quiz && e.quiz.length === 3 && e.quiz.every(q => q.options[q.answer])));
 
   /* ---- 2. pH engine ---- */
-  for (const [id, want] of [['water', 7.00], ['hcl', 1.00], ['naoh', 13.00], ['ethanoic', 2.88], ['nh4cl', 5.13], ['ammonia', 11.12], ['nahco3', 8.34], ['limewater', 12.60]]) {
+  for (const [id, want] of [['water', 7.00], ['hcl', 1.00], ['naoh', 13.00], ['ethanoic', 2.88], ['nh4cl', 5.13], ['ammonia', 11.12], ['nahco3', 8.34], ['limewater', 12.60], ['cuso4', 4.25], ['fecl3', 1.65]]) {
     const got = pHof([id, 10]); ok('pH engine', `${SUBSTANCES[id].name}: pH ${fmt(want, 2)}`, near(got, want, 0.05), `got ${fmt(got, 2)}`);
   }
   for (const [v, want] of [[0, 1.00], [12.5, 1.48], [24.9, 3.70], [25, 7.00], [25.1, 10.30], [30, 11.96]]) {
@@ -3481,6 +3630,10 @@ async function runSelfTests() {
   ok('Reactions', 'NaHCO₃ on its own does not fizz', !mix(['nahco3', 3]).fired.includes('co2'));
   r = mix(['limewater', 8]); r.m.sp.CO3 = 1e-4; r.m.touch(); Chem.react(r.m);
   ok('Reactions', 'CO₂ turns limewater milky (CaCO₃)', near(r.m.ppt['CaCO3(s)'], 1e-4, 1e-9) && Chem.appearance(r.m).cloud > 0.5);
+  r = mix(['limewater', 8]); r.m.sp.CO3 = 1e-4; r.m.touch(); Chem.react(r.m); r.m.sp.CO3 = (r.m.sp.CO3 || 0) + 5e-4; r.m.touch(); Chem.react(r.m);
+  ok('Reactions', 'Excess CO₂ makes milky limewater clear again', !(r.m.ppt['CaCO3(s)'] > 1e-9) && near(r.m.sp['Ca2+'], 1.6e-4, 1e-9));
+  r = mix(['limewater', 8]); r.m.sp.CO3 = 1e-4; r.m.touch(); Chem.react(r.m); r.m.merge(mixtureOf('hcl', 5)); Chem.react(r.m);
+  ok('Reactions', 'Acid dissolves calcium carbonate', !(r.m.ppt['CaCO3(s)'] > 1e-9));
   ok('Reactions', 'Neutralisation: 25 cm³ 0.1 M HCl + 25 cm³ 0.1 M NaOH = 2.5 mmol', near(Chem.neutralised(mixtureOf('hcl', 25), mixtureOf('naoh', 25)), 2.5e-3, 1e-9));
   const th = new Mixture(); th.addSolid('cuco3', 0.01); th.temp = 500;
   for (let i = 0; i < 200; i++) Chem.thermal(th, 0.25);
@@ -3500,20 +3653,31 @@ async function runSelfTests() {
   await scenario('Titration', async () => {
     await startExp('titration');
     const pip = find('pipette'), fl = find('flask'), bur = find('burette');
-    await pipetteFill(pip, reagent('hcl_unknown')); cancelMode();
-    await pipetteRelease(pip, fl);
-    ok('Scenarios', 'Titration: pipette delivers exactly 25.00 cm³', near(fl.container.vol, 25, 0.001), `got ${fmt(fl.container.vol, 3)}`);
-    await doDrops(dropper('php'), fl, 3);
-    await buretteFill(bur, reagent('naoh'));
-    fl.group.position.copy(bur.group.localToWorld(bur.snapLocal.clone())); dropItem(fl);
     const eq = 25 * SUBSTANCES.hcl_unknown.conc / 0.1;
-    setTap(bur, 'fast'); await until(() => bur.dispensed >= eq - 1.2, 40); setTap(bur, 'closed');
-    for (let n = 0; n < 80 && Runner.i === 5; n++) { buretteDrop(bur); await simWait(0.4); }
-    ok('Scenarios', 'Titration: end point within one drop of equivalence', S.titr.end && near(S.titr.end.v, eq, 0.06), `end ${fmt(S.titr.end ? S.titr.end.v : 0, 2)} vs ${fmt(eq, 2)} cm³`);
+    const runCount = () => titrationRuns().length;
+    const run = async first => {
+      if (!first) { emptyToSink(fl); await until(() => !S.busy, 20); }
+      await pipetteFill(pip, reagent('hcl_unknown')); cancelMode();
+      await pipetteRelease(pip, fl);
+      if (first) ok('Scenarios', 'Titration: pipette delivers exactly 25.00 cm³', near(fl.container.vol, 25, 0.001), `got ${fmt(fl.container.vol, 3)}`);
+      await doDrops(dropper('php'), fl, 3);
+      if (first || bur.container.vol < eq + 3) await buretteFill(bur, reagent('naoh'));
+      if (first) { fl.group.position.copy(bur.group.localToWorld(bur.snapLocal.clone())); dropItem(fl); }
+      const start = bur.dispensed, before = runCount();
+      setTap(bur, 'fast'); await until(() => bur.dispensed - start >= eq - 1.2, 40); setTap(bur, 'closed');
+      for (let n = 0; n < 80 && runCount() === before; n++) { buretteDrop(bur); await simWait(0.4); }
+    };
+    await run(true);
+    ok('Scenarios', 'Titration: rough end point within one drop of equivalence', S.titr.end && near(S.titr.end.v, eq, 0.06), `end ${fmt(S.titr.end ? S.titr.end.v : 0, 2)} vs ${fmt(eq, 2)} cm³`);
     ok('Scenarios', 'Titration: curve recorded', S.titr.points.length > 20);
     await answer('10.00');
     ok('Scenarios', 'Titration: a wrong titre is rejected', Runner.i === 6);
-    await answer(fmt(bur.dispensed, 2)); await answer(fmt(0.1 * bur.dispensed / 25, 4));
+    await answer(fmt(titrationRuns()[0].titre, 2));
+    await run(false); await run(false);
+    const cc = concordantSet();
+    ok('Scenarios', 'Titration: two accurate runs are concordant', cc && cc.titres.length >= 2 && Runner.i === 8, cc ? cc.titres.map(t => fmt(t, 2)).join(', ') : 'none');
+    ok('Scenarios', 'Titration: each run starts from its own initial reading', titrationRuns().every(r => near(r.titre, eq, 0.06)), titrationRuns().map(r => fmt(r.titre, 2)).join(', '));
+    await answer(fmt(cc.mean, 2)); await answer(fmt(0.1 * cc.mean / 25, 4));
     ok('Scenarios', 'Titration: all steps completed', Runner.completed);
   });
   await scenario('Flame tests', async () => {
@@ -3530,7 +3694,11 @@ async function runSelfTests() {
   });
   await scenario('Precipitation', async () => {
     await startExp('precip');
-    const tubes = findAll('testtube');
+    const tubes = findAll('testtube'), rack = find('rack');
+    startDrag(tubes[0]); tubes[0].group.position.copy(rack.group.localToWorld(V3(rack.slots[5], 0.009, 0))); dropItem(tubes[0]);
+    ok('Scenarios', 'Racks: a test tube can be moved to an empty slot', tubes[0].parentEquip === rack && tubes[0].slot === 5);
+    startDrag(tubes[1]); tubes[1].group.position.set(rack.group.position.x, BENCH_Y, rack.group.position.z + 0.3); dropItem(tubes[1]);
+    ok('Scenarios', 'Racks: a tube dropped away from the rack goes back to its slot', tubes[1].parentEquip === rack && tubes[1].slot === 1);
     const plan = [['nacl', 'agno3', 'AgCl(s)'], ['kbr', 'agno3', 'AgBr(s)'], ['ki', 'agno3', 'AgI(s)'], ['cuso4', 'naoh_drop', 'Cu(OH)2(s)']];
     for (let i = 0; i < 4; i++) { await doPour(reagent(plan[i][0]), tubes[i], 2); await doDrops(dropper(plan[i][1]), tubes[i], 3); }
     ok('Scenarios', 'Precipitation: correct precipitate in each tube', plan.every((p, i) => tubes[i].container.m.ppt[p[2]] > 0));
@@ -3577,6 +3745,13 @@ async function runSelfTests() {
     ok('Scenarios', 'Safety: ethanol cannot be heated', bk1.onSource !== hp);
     await doPour(reagent('water'), cylE, 25);
     ok('Scenarios', 'Measuring cylinder holds the poured 25.0 cm³', near(cylE.container.vol, 25, 0.001));
+    const flask = find('flask'), pouring = doPour(cylE, flask, 10);
+    await simWait(1.2);
+    ok('Scenarios', 'Pouring: liquid surface stays level while the cylinder tilts', cylE.container.liquid.geometry === cylE.container.fullGeo && cylE.container.clip.constant < 10);
+    await pouring;
+    ok('Scenarios', 'Pouring: 10.0 cm³ moved from cylinder to flask', near(flask.container.vol, 10, 0.001) && near(cylE.container.vol, 15, 0.001));
+    History.undo();
+    ok('Scenarios', 'Undo: reverses the last pour', near(flask.container.vol, 0, 1e-9) && near(cylE.container.vol, 25, 0.001));
     await doPour(reagent('water'), bk2, 30);
     bk2.group.position.copy(hp.group.position); dropItem(bk2);
     hp.level = 'high'; toggleHotplate(hp);
