@@ -43,23 +43,29 @@ The lab lowers its resolution, then turns off shadows, if the frame rate stays b
 
 ## Self-test
 
-Add `?test` to the address (for example `http://localhost:8123/?test`) to run the built-in test suite in any browser. It takes about 40 seconds and covers:
+Add `?test` to the address (for example `http://localhost:8123/?test`) to run the built-in test suite in any browser. It runs 104 checks in about two and a half minutes:
 
 - data integrity
 - the pH engine against textbook values
-- reaction rules and indicator colours
-- full runs through all five experiments, plus safety checks
+- reaction rules, indicator colours, magnesium kinetics and electrolysis rules
+- full runs through all eight experiments, plus safety checks, saving and the tour
+- teacher settings, the share link and reports
 
 Results appear in a panel with a "Copy report" button. Keep the tab visible while it runs, because browsers pause background tabs.
 
-## Experiments (Phase 1)
+## Experiments
 
 0. Free lab: mix any of the chemicals on the bench
 1. Acid–base titration (HCl against NaOH, phenolphthalein, live pH and titration curve; a rough run, then repeat runs until two titres are concordant)
-2. Flame tests (Li⁺, Na⁺, K⁺, Ca²⁺, Cu²⁺)
+2. Flame tests (Li⁺, Na⁺, K⁺, Ca²⁺, Cu²⁺, plus an unknown sample X to identify)
 3. Precipitation reactions (silver halides, copper(II) hydroxide)
 4. Universal indicator and the pH scale
 5. Thermal decomposition of copper(II) carbonate, with the limewater test
+6. Rates of reaction: magnesium and 1.0 M or 0.50 M hydrochloric acid, gas syringe, live volume–time graph, squeaky-pop test for hydrogen
+7. Electrolysis of copper(II) sulfate with graphite electrodes and a power pack (copper at the cathode, oxygen at the anode; chloride solutions give chlorine)
+8. Paper chromatography of four inks, with Rf values and an unknown ink
+
+Slow experiments (6–8) have a ⏩ button that speeds up time.
 
 On a first visit a short guided tour explains the controls; it includes two "try it" steps. Progress is saved automatically in the browser (`localStorage`): the bench, the current step, the notebook, which experiments are finished and the best quiz scores. The welcome screen offers "Continue where you left off", and burners and hot plates come back switched off. The ? button can replay the tour or clear saved progress. Saving is per browser and per device; it doesn't sync between computers.
 
@@ -68,6 +74,14 @@ Undo (Ctrl+Z, or the arrow button in the top bar) reverses pours, drops, and pip
 ## Note for teachers
 
 Hazard labels in the app err on the side of caution. Before using it with a class, check them against your own hazard cards (for example CLEAPSS or SSERC).
+
+**Teacher tools** (? button → Teacher tools, or add `?teacher` to the address):
+
+- **Class settings:** a fixed or random acid concentration for the titration, the metal ion in flame-test sample X, and the dyes in chromatography ink D.
+- **Share link:** copy a link that carries your settings, for example `https://chemlab-3d.vercel.app/?hcl=0.0950&flame=K&ink=br`. Students who open it get those unknowns, with no account needed.
+- **Reports:** students press **Report** in the side panel, or you use Teacher tools, to print or save as PDF, or download a text file. A report has a marking summary (steps completed, answers that needed another try, safety warnings, quiz score and result accuracy), the results tables and the full notebook.
+
+Settings are stored in the browser and in the link, not on a server. A curious student can open Teacher tools and see the answers, so use the unknowns for practice rather than formal assessment.
 
 ## Code layout (inside `index.html`)
 
